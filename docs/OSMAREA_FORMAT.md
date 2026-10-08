@@ -220,6 +220,3 @@ contains water beyond the boundary). From `denmark-latest` (2026-09-18): 700,620
 2. The exact drawing order of c3/c5/c6 and the order of the c5 objects (the compiler is
    roughly like the original, `CLASS_ORDER`).
 3. Why ~8 % of the bounding boxes are larger than their points.
-4. Runtime: for Denmark Python needs 1 min for the extraction and 2.5 min for the compiler
-   (merging the large classes and reading the original's sea), the Rust port 1 min from the
-   PBF to the file.

@@ -56,11 +56,10 @@ The real acceptance test runs against actual maps (which are not in this reposit
 match the original byte for byte. For the Danish map that is all **14,185 records** (osm
 5878, ta 4125, osmpoi 3704, osmarea 368, osmpoint 110) in 1.3 s.
 
-A compiled layer cannot be checked that way — it is built from today's OSM and the originals
-are from 2021 — so the tables below give the record counts from a **cross-check** instead:
-the layer built twice from the same input by two independent implementations of its rules,
-with the decrypted records compared (`teasi md5s` on both files, then a `diff`; the files
-themselves always differ, because every tile gets a new random key).
+A compiled layer cannot be checked against an original — it is built from today's OSM, the
+originals are from 2021 — so what the layer documents in [../docs/](../docs/) record instead
+is how the rules were calibrated against the original: what fraction of the objects at an
+identical position get the same class, name and flags.
 
 | Command | Purpose |
 |---|---|
@@ -85,23 +84,9 @@ themselves always differ, because every tile gets a new random key).
 
 The serial number comes from `TEASI_DEVICE`, the default being the one in `chart.rs`.
 
-## Measured
-
-Against the original Danish map, 16 cores.
-
-| | |
-|---|---:|
-| decrypting osmpoi (3704 records) | 0.06 s |
-| decrypting osmarea (368) | 0.33 s |
-| decrypting ta (4125) | 0.42 s |
-| decrypting osm (5878) | 1.35 s |
-| taking the search index apart and rebuilding it | 0.12 s |
-| rewriting osmpoi (`roundtrip`) | 3.1 s |
-
-Decrypting is bounded by PC1, which is a byte-at-a-time stream cipher and runs on one core
-per record. **Writing** is bounded by the LZMA compression instead, at around 1.5 MB/s per
-core: rewriting the whole Danish osm file takes 61 s, which is almost pure compression time
-and cannot be pushed down much further.
+Decrypting is bounded by PC1, a byte-at-a-time stream cipher that runs on one core per
+record; writing is bounded by the LZMA compression at around 1.5 MB/s per core, which is why
+rewriting the whole Danish osm file takes 61 s and cannot be pushed down much further.
 
 ## Reading OSM
 
@@ -194,12 +179,11 @@ Nothing in between — one command from the extract to the chart file:
 ./target/release/teasi osmpoint …    # the same arguments
 ```
 
-Checking runs in two stages. The candidates first, as with the addresses: `teasi poi <pbf>
-<out>` writes a canonical dump, which can be paired up by kind and OSM id. Then the finished
-file, record by record. Cross-checked that way, all 3699 Danish osmpoi records and all 128
-osmpoint records agreed, as did 15,603 of 15,619 British osmpoi records and all 354 osmpoint
-ones. What deviates are the area rings from above: nodes and ways agree 100 %, and only for
-individual multipolygons is the centre off by metres.
+`teasi poi <pbf> <out>` writes a canonical dump of the candidates, one sorted line each, so
+that two runs can be diffed; `teasi md5s` does the same for the finished files, which differ
+in their bytes (every tile gets a new random key) but have to agree in their decrypted
+records. What the self-touching rings from above cost here: nodes and ways are unaffected,
+and only for individual multipolygons is the centre off by metres.
 
 | | PBF → chart file |
 |---|---:|
@@ -266,29 +250,27 @@ the order in which libosmium flushes its buffers. That order decides which polyg
 union first and hence what ends up in the file, and it is not reproducible, so the areas are
 sorted by their osmium id instead.
 
-### What was checked
-
-In two stages as with the POIs — the extractor first, then the records:
+### What comes out, and where it is not exact
 
 ```bash
 ./target/release/teasi area osm_ref/denmark-latest.osm.pbf area.txt
 ```
 
-That dump pairs up by the osmium id; the finished files are compared object by object, which
-is finer than `teasi md5s` and says which ring differs.
+That dump holds one line per area and coastline way, keyed by the osmium id.
 
 | | Denmark | Great Britain |
 |---|---|---|
-| areas as libosmium assembles them | 978,902 of 978,957 | 4,868,244 of 4,868,591 |
-| coastline ways | 2230 of 2230 | 28,184 of 28,184 |
-| polygons per class | 700,620 in 16 classes, 6 of them deviating | 2,520,840 in 16 classes, 52 of them deviating |
-| records cross-checked | 308 of 340 | 1029 of 1157 |
+| areas | 978,957 | 4,868,591 |
+| coastline ways | 2230 | 28,184 |
+| polygons per class | 700,620 in 16 classes | 2,520,840 in 16 classes |
+| records | 340 | 1157 |
 | runtime (PBF → chart file) | 61 s | 190 s, 7.1 GB |
 
-The deviating records hang off the deviating areas from above (55 in Denmark, 347 in Great
-Britain): a single deviating area changes the union of its class and with it every block it
-lies in — and one record holds every class of a cell. Object by object it comes down to
-individual rings with one point more or less.
+The areas whose rings touch themselves are the ones that come out differently from libosmium
+— 55 in Denmark, 347 in Great Britain (see above) — and that reaches further than it sounds:
+one such area changes the union of its class, and with it every block the union lies in,
+while one record holds every class of a cell. On the ground it is individual rings with one
+point more or less.
 
 The sea is the most involved part of this and matches completely: the coastline is assembled
 into chains (land on the left, open chains closed with a straight line), outside the boundary
@@ -365,37 +347,32 @@ For the node heights the 4 nearest neighbours are needed (inverse distance²). I
 kd-tree, a uniform grid lies over the known points and is searched ring by ring outwards
 until the next ring cannot be any closer — the same result, only without a tree.
 
-### What was checked
-
-In two stages as with the other layers — the extractor, then the records:
+### What comes out
 
 ```bash
 ./target/release/teasi ways osm_ref/denmark-latest.osm.pbf ways.txt
-./target/release/teasi md5s <one.v20210916> ; ./target/release/teasi md5s <other.v20210916>
 ```
 
 The dump holds the class or line type, the flags, the number of rows, the name and an MD5
-over the node ids and coordinates (as IEEE bit patterns) per way — which puts the tag tables
-on the test bench as well.
+over the node ids and coordinates (as IEEE bit patterns) per way, so two runs of the
+extractor can be diffed line by line — tag tables included.
 
 | | Denmark | Great Britain |
 |---|---|---|
-| ways from the extractor | 1,538,105 | – |
-| records cross-checked | 5981 of 5982 | **all 22,711** |
+| ways from the extractor | 1,538,105 | 8,481,450 |
+| records | 5982 | 22,711 |
 | file size | 92,253,033 B | 531,333,357 B |
 | runtime (PBF → chart file) | 66 s | 4:13, 16.0 GB |
 
-Every intermediate figure matched down to the entry: 1,454,524 streets and 83,581 lines,
-1,816,001 shared nodes, 3,004,615 edges, 2,404,747 graph nodes in 354 B cells (336 kept),
-134 A, 336 B, 5129 D and 95 C records, 21 tiles including the three copied Faroese tiles —
-for Great Britain correspondingly 7,861,689/619,761, 15,029,377 edges, 12,119,884 graph
-nodes, 20,507 D records.
+What that is made of: Denmark 1,454,524 streets and 83,581 lines, 1,816,001 shared nodes,
+3,004,615 edges, 2,404,747 graph nodes in 354 B cells (336 kept), 134 A, 336 B, 5129 D and
+95 C records, 21 tiles including the three copied Faroese tiles — Great Britain
+7,861,689/619,761, 15,029,377 edges, 12,119,884 graph nodes, 20,507 D records.
 
-Denmark's one deviating record is a B cell in which **5 of 3,004,615 edges** have an ascent
-that differs by 1 cm. The cause is 16 pairs of known node heights that sit at the **same
-position** and carry different heights (up to 6 cm apart, noise from the least-squares
-reconstruction); which of the two enters the mean of the 4 neighbours is arbitrary. Great
-Britain takes the grid route and has no such ambiguity.
+One ambiguity is worth knowing about when the heights come from a reconstruction rather than
+the grid: 16 pairs of Danish node heights sit at the **same position** and carry different
+values (up to 6 cm apart), so for 5 of 3,004,615 edges it is arbitrary which of the two
+enters the mean of the 4 neighbours, and the ascent lands 1 cm either way.
 
 ## The ta layer (address search)
 
@@ -438,33 +415,30 @@ output twice:
 The third one was the hardest to find: without it, 2 Danish and 37 British records came out
 differently from one run to the next.
 
-### What was checked
+### What comes out
 
 ```bash
 ./target/release/teasi ta --country=4 --name=Denmark denmark-latest.osm.pbf denmark.poly \
     dk.v2 20260918
-./target/release/teasi md5s one.v2 ; ./target/release/teasi md5s other.v2   # then diff
-./target/release/teasi index dk.v2                                          # the search index
+./target/release/teasi index dk.v2        # take the search index apart and rebuild it
 ```
 
 | | Denmark | Great Britain |
 |---|---|---|
-| records cross-checked | **all 3958** | 13,679 of 13,680 |
-| search index | **identical** (1,943,962 B) | 9 of 522,760 nodes differ |
+| records | 3958 | 13,680 |
+| search index | 1,943,962 B | 522,760 nodes |
 | file size | 24,644,993 B | 113,851,396 B |
 | runtime (PBF → chart file) | 40 s | 3:19, 13.7 GB |
 
-Here too every intermediate figure matched: Denmark 408,262 named streets, 1,257,070 edges,
-1,296,848 pieces, 2,480,980 matched house numbers on 735,263 pieces, 117,162 streets, 99 A
-and 3859 D records, 12,483 places with streets and 4935 without; Great Britain
-1,969,512 / 5,225,753 / 5,334,223 / 4,909,355 / 915,297, 376 A and 13,304 D records, 48,352
-places with streets, 82,998 without and 2603 postcode districts.
+What that is made of: Denmark 408,262 named streets, 1,257,070 edges, 1,296,848 pieces,
+2,480,980 matched house numbers on 735,263 pieces, 117,162 streets, 99 A and 3859 D records,
+12,483 places with streets and 4935 without; Great Britain 1,969,512 / 5,225,753 / 5,334,223
+/ 4,909,355 / 915,297, 376 A and 13,304 D records, 48,352 places with streets, 82,998 without
+and 2603 postcode districts.
 
-The one deviating British record and the 9 index nodes do **not** go back to the ta compiler
-but to the known residue in the address extractor (areas whose rings touch themselves): Rust
-finds 2 addresses more, one of which turns the range 111–147 into 111–149 and one of which
-shifts the centre of the district BN10 by 5 cm; the two other affected index hits are the two
-place areas that already differ by 27 m there.
+The self-touching rings reach this layer too, through the addresses: a single extra address
+can turn a range 111–147 into 111–149, and an extra place shifts the centre of a postcode
+district — BN10 by 5 cm.
 
 ## The terrain layer (elevation model and map images)
 
@@ -517,11 +491,8 @@ For the elevation tiles the same library Pillow uses is needed: a pure Rust enco
 deliver different bytes (how the rate is distributed over the code blocks is a matter of
 implementation), and what the decoder in the device accepts is not documented.
 `openjpeg-sys` compiles OpenJPEG 2.5.3 into the binary; the parameters are those of Pillow's
-plugin (`irreversible`, 6 resolutions, code blocks 64×64, LRCP, one layer, ratio 50). The
-result is **byte-identical** down to one byte: OpenJPEG writes its own version into the
-comment marker, and Pillow ships 2.5.4. That stays as it is: writing a false version into
-the file would be worse than one byte of difference, and the comparison masked that byte
-out.
+plugin (`irreversible`, 6 resolutions, code blocks 64×64, LRCP, one layer, ratio 50), and the
+version it writes into the codestream's comment marker is its own.
 
 The map images go through `jpeg-encoder` (pure Rust) instead of libjpeg-turbo: baseline,
 4:2:0, standard Huffman tables, IJG quantisation for quality 80, JFIF with 96 dpi and the
@@ -529,36 +500,20 @@ EXIF APP1 of the originals. The bytes are different — the segments come in a d
 and the chroma subsampling averages per block while libjpeg filters triangularly. For images
 that are lossy anyway and that the file keeps no checksum over, that is accepted.
 
-### What was checked
+### What comes out
 
-Two chart files were compared region by region — the tables, the elevation tiles byte for
-byte, the map images as pixels. `teasi check` cannot do this; the layer has no slot areas.
-
-| | Regions | Elevation tiles | Map images |
-|---|---|---|---|
-| Denmark | 28 of 28 | **1034 of 1034** | 516 of 2029 pixel-identical |
-| Great Britain | 85 of 85 | **1999 of 1999** | 2680 of 5391 pixel-identical |
-
-The elevation tiles are identical down to the version byte, `a0` and `a1` included; not a
-single one deviates in its codestream. For the map images the mean deviation is 0.025 out of
-255 and the median of the largest deviation per image is **1**; in the worst image 95, as
-ringing around individual pixels in densely drawn areas. That half of the images come through
-pixel-identically — and just as detailed ones as the deviating ones — shows that the source
-images agree and only the encoder differs. The files are 36,886,754 instead of 36,887,738 B,
-three hundred-thousandths smaller.
-
-| | PBF and shapefile → chart file |
-|---|---:|
-| Denmark (28 regions) | 17 s, 1.7 GB — 7 s of that the regions |
-| Great Britain (85 regions) | 1:24, 7.9 GB |
+| | Regions | Elevation tiles | Map images | PBF and shapefile → chart file |
+|---|---|---|---|---:|
+| Denmark | 28 | 1034 | 2029 | 17 s, 1.7 GB — 7 s of that the regions |
+| Great Britain | 85 | 1999 | 5391 | 1:24, 7.9 GB |
 
 Those times include reading the 2.2 GB PBF and the 1.3 GB shapefile; the drawing itself is
-spread across every core.
+spread across every core. `teasi check` cannot look into this layer — it has no slot areas —
+so a region has to be unpacked to be inspected.
 
-One small thing deviates before the drawing starts: 525,037 land cover areas are bound into
-the Danish regions where the cross-check has 525,034. These are the same 55 of 978,957
-areas that the extractor already splits differently for the osmarea layer (rings that touch
-themselves); the number of images and elevation tiles is the same in every region.
+The self-touching rings cost a little here as well: 525,037 land cover areas go into the
+Danish regions, three of which depend on how those 55 of 978,957 areas are split. The number
+of images and elevation tiles does not change.
 
 ## Two pitfalls
 

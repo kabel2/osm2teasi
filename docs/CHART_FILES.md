@@ -273,7 +273,9 @@ cd rust && cargo build --release        # ./target/release/teasi
 
 `osmarea`, `osm`, `ta` and `terrain` need libgeos, opened at run time (`src/geos.rs`), so
 building the binary itself needs nothing but a Rust toolchain, and running it needs nothing
-else at all.
+else at all. How the implementation is put together — the layers' algorithms, the pieces of
+libosmium, GEOS and Pillow it reproduces, and the pitfalls — is in
+[../rust/README.md](../rust/README.md).
 
 The device's serial number sits in one place: `DEVICE` in `rust/src/chart.rs`, overridable
 with the environment variable `TEASI_DEVICE`. Every function with a `device` parameter takes
@@ -534,116 +536,6 @@ a Ghidra project of its own (Ghidra 12); the one-off searches from the analysis 
 Code that Ghidra has not assigned to a function is only found by `InsnGrep` (`in ?` in its
 output). That is where the key initialisation sits (`0x1fd148`), for instance. Such places
 can be disassembled with Capstone.
-
-### 5.9 How it was verified
-
-Everything described above was first written in Python and then ported to Rust module by
-module, with the Python output as the reference at every step: the shell (PC1, the header MAC,
-raw LZMA1, the containers A/B/C/D and osmpoint, the writer, the search index), reading OSM,
-and all six compilers, and finally the elevation grid. Once every layer agreed the reference
-was removed; it is in the history up to commit `fc17505`. The record of what agreed with what
-is this section, and the checks that do not need the reference are still here:
-
-```bash
-cd rust && cargo build --release
-./target/release/teasi check <maps>/Denmark_*.v2*   # 14,185 records byte-identical, 1.3 s
-./target/release/teasi roundtrip <maps>/Denmark_ta.v20180608
-./target/release/teasi index <maps>/Denmark_ta.v20180608
-```
-
-Decrypting is 40 to 70 times faster than in Python (where PC1 manages only 0.13 MB/s),
-writing about 8 times; there the LZMA compression at around 1.5 MB/s per core sets the lower
-bound. Two pitfalls are described in `rust/README.md`: liblzma writes raw LZMA1 only as
-`.lzma` (cut off the 13-byte header, and the length in the header has to stay "unknown", or
-the end marker gets in the way), and the containers have to pass the fields nobody
-understands straight through.
-
-Reading OSM is ported too (`pbf.rs`: the PBF reader and the node index, `addr.rs`:
-the address extractor). For Denmark it delivers all 2,628,399 entries **bit-identically**, in
-4.7 instead of 270 s; for Great Britain 5,023,341 of 5,023,358 addresses and 111,338 of
-111,340 places bit-identically. Both sides wrote the same canonical dump, which was compared
-line by line; `teasi addr <pbf> <out>` still writes it.
-
-That the areas come out right at all is down to libosmium's area assembler, reproduced in
-`pbf.rs`: out of **edges**, which are normalised and sorted and cancel each other out in
-pairs when they appear twice (so two ways running alongside each other merge into one ring);
-locations are compared, not node ids; a ring that touches itself falls apart into two there;
-every ring starts at its smallest vertex and repeats it at the end; outer/inner is decided by
-nesting, not by the member role; and `area=no` forbids the area. Without all that, 4.3 of the
-5.0 M British addresses were off by a median of 1.6 m.
-
-All six layer compilers are ported. `poi.rs` reads the candidates for `osmpoi.rs` and
-`osmpoint.rs`, all in one pass over the PBF (Great Britain 35 and 17 s instead of 24 min for
-the extraction alone); for Denmark all 3699 osmpoi and all 128 osmpoint records are
-byte-identical with the Python output, for Great Britain 15,603 of 15,619 osmpoi records and
-all 354 osmpoint records. `osmarea.rs` (with `area.rs`, `land.rs` and `geos.rs`) builds the
-area layer: 308 of 340 Danish records byte-identical, 1029 of 1157 British ones. What
-deviates are multipolygons with self-touching rings, which libosmium splits differently.
-
-`osm.rs` (with `way.rs` for the ways and `heights.rs` for the ascents) builds the street
-layer: for Great Britain **all 22,711 records** are byte-identical and the file is the same
-size down to the byte as Python's (531,333,357 B), in 4:13 instead of 18:23 and with 16.0
-instead of 18.0 GB. For Denmark 5981 of 5982 records; the one difference is 5 of 3,004,615
-edges with an ascent that differs by 1 cm, because 16 pairs of known node heights sit at the
-same position and carry different heights — which of them enters the mean of the 4 neighbours
-is arbitrary. All 1,538,105 Danish ways come out of the extractor bit-identically, tag tables
-and flags included.
-
-`ta.rs` (with `grid.rs` instead of scipy's kd-tree) builds the address search together with
-the search index: for Denmark **all 3958 records and the search index are byte-identical**,
-for Great Britain 13,679 of 13,680 records, and both files are the same size down to the byte
-(113,851,396 B) — in 3:19 instead of 4:12 and with 13.7 instead of 16 GB. The one deviation
-is a house number range ending at 149 instead of 147, because the Rust address extractor
-finds two addresses more (the same residue as above). Three things had to change before two
-runs over the same input produced the same output at all: addresses, places and interpolation
-lines are sorted canonically, a search index node's children are sorted by character
-(previously the iteration order of a Python `set`, so dependent on the hash seed), and a
-correlation below 10⁻¹² counts as zero instead of its last bit deciding the direction of a
-house number range.
-
-`terrain.rs` builds the elevation model and the map images. For Denmark as for Great Britain
-**every elevation tile** (1034 and 1999 respectively) is byte-identical with the Python
-output — down to one byte per tile, because OpenJPEG writes its own version into the comment
-marker and Pillow ships a different one. Great Britain takes 1:24 and 7.9 GB and reads the
-PBF and the shapefile itself along the way; Python needs 2 min and 10 GB for the compiler
-alone, plus the three extractions. Three pieces of Pillow sit in `raster.rs`, reproduced line
-by line from the C sources and all three bit-identical: the polygon filler
-(`ImageDraw.polygon`), the Lanczos resize (`Image.resize`) and the hillshade (`np.gradient`).
-The elevation tiles go through OpenJPEG itself (`openjpeg-sys`), because how the rate is
-distributed over the code blocks is a matter of implementation and the device's JP2 decoder is
-undocumented; the map images go through `jpeg-encoder` instead of libjpeg-turbo, which yields
-different bytes and about half the images pixel-identical (mean deviation 0.025 out of 255).
-That comparison ran region by region outside `teasi check`, which does not know this layer —
-it has no slot areas.
-
-```bash
-./target/release/teasi osmpoi  <pbf> <poly> <out> [YYYYMMDD] --country=17
-./target/release/teasi osmpoint <pbf> <poly> <out> [YYYYMMDD] --country=17
-./target/release/teasi osmarea <pbf> <poly> <original|-> <out> [YYYYMMDD] --country=17
-./target/release/teasi osm <pbf> <poly> <original|-> <out> [YYYYMMDD] --country=17 \
-    "--name=United Kingdom" --heights=<file.bin>
-./target/release/teasi ta <pbf> <poly> <out> [YYYYMMDD] --country=17 "--name=United Kingdom"
-./target/release/teasi terrain <heights.bin> <poly> <out> [YYYYMMDD] --country=17 \
-    --land=<land_polygons.shp> --area=<pbf>
-./target/release/teasi md5s <map>   # on both files, then diff
-```
-
-`osmarea`, `osm`, `ta` and `terrain` (with images) need **libgeos** (shapely uses it too, and
-the result is only bit-identical with the same version): `geos.rs` loads the library at
-runtime with `dlopen`, found through `TEASI_GEOS`. The build itself does not need it. One
-thing the port forced: the areas are sorted by their osmium id, because the extractor's order
-(libosmium's buffer order) helps decide which polygon comes first in a union and cannot be
-reproduced.
-
-**Nothing stays in Python.** The elevation data was the last piece (`dem.rs`): its own
-GeoTIFF reader for the Copernicus tiles — float32, DEFLATE, the floating-point predictor of
-TIFF Technical Note 3 — and `scipy.ndimage.gaussian_filter` reproduced down to the rounding,
-numpy's pairwise summation for the kernel included. The 1.35 GB grid for Great Britain comes
-out **byte-identical** with the one Python built, and a Danish test box does too; the TIFF
-reader and the Gaussian are pinned in `rust/tests/compat.rs` against fixtures from
-`tifffile` and scipy. What remains unported is only the reconstruction of node heights from
-an original chart's ascents (scipy's `lsqr` over 2.1 M equations), which needs an original
-file to begin with.
 
 ---
 

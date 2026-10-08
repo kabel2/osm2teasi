@@ -330,10 +330,9 @@ It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.
 6. Only cells touching the area (`denmark.poly`) plus 32,768 units (one D cell); edges to
    nodes in omitted B cells drop out of the graph and their ids in D become 0. The Faroese
    tiles (west of 0°) are taken unchanged from the original (only with an original).
-7. **Memory:** the edges, the graph nodes and their numbering per B cell are computed for the
-   whole country with numpy, and the B, D and A records afterwards **tile by tile**; the tag
-   dicts are freed once evaluated. For Denmark the records are byte-identical with the
-   earlier run at 4.9 instead of 10.9 GB; Great Britain 18 min, 18 GB.
+7. **Memory:** the edges, the graph nodes and their numbering per B cell are computed for
+   the whole country at once, the B, D and A records afterwards **tile by tile**. Great
+   Britain needs 16 GB for that and takes 4:13 from the PBF to the file.
 
 **Countries without an original file** (Great Britain): pass `-` as the original, and then
 c2/c4 stay empty and nothing is copied; `--country=N` (the header's country code,
@@ -367,16 +366,6 @@ Ascent: correlation 0.88, 86 % within 10 cm, 96 % within 50 cm, median ratio 1.0
 from `denmark-latest` (2026) has 38 % more edges (3.0 instead of 2.2 M) and is 92 MB
 (the original 63 MB); the largest records (B 4.2 MB, D 1.0 MB) stay below those of the German
 map (6.5 / 1.3 MB). The cost factor (bits 20–23) and bit 28 stay 0.
-
-### What was checked
-
-Both implementations built the layer from the same input and the files were compared record
-by record (`teasi md5s` on each, then a diff). For Great Britain **all 22,711 records** came
-out byte-identical, and the file the same size down to the byte (4:13 instead of 18:23, 16.0
-instead of 18.0 GB); for Denmark 5981 of 5982. In that one record, 5 of 3,004,615 edges have
-an ascent that differs by 1 cm, because 16 pairs of reconstructed node heights sit at the
-same position and disagree — which of them enters the mean of the 4 neighbours is arbitrary
-in either implementation.
 
 ## Open questions
 

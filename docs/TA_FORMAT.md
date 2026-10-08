@@ -188,9 +188,9 @@ teasi check <maps>/Denmark_ta.v20180608    # every A and D record, taken apart a
 teasi index <maps>/Denmark_ta.v20180608    # the search index behind header 0x70
 ```
 
-The search itself (place → cells → street list → first matching edge → position) was replayed
-offline against the semantics above, at 3000 random addresses; see below. That replay lived in
-the Python reference and is in the history up to commit `fc17505`.
+The search itself — place → cells → street list → first matching edge → position — can be
+replayed offline against the semantics above; "Match against Denmark" below does that at 3000
+random addresses.
 
 ## Building it from OSM
 
@@ -239,17 +239,12 @@ the streets.
    - Names are stored inline (no word pool), every language mask full, the language list as
      in DK.
 
-### What was checked
+### Reproducibility
 
-For Denmark **all 3958 records and the search index came out byte-identical** with the
-Python reference, for Great Britain 13,679 of 13,680 records, and both files are the same
-size down to the byte; the one difference and 9 of 522,760 index nodes go back to the two
-addresses that the Rust extractor additionally finds.
-
-Three rules had to change before two runs over the same input produced the same output at
-all: addresses, places and interpolation lines are sorted canonically (the extractor hands
-out libosmium's order), a search index node's children are sorted by character (previously
-the iteration order of a Python `set` — which changes with the hash seed), and a correlation
+Three rules decide whether two runs over the same input produce the same file at all:
+addresses, places and interpolation lines are sorted canonically (the extractor hands out
+libosmium's order), a search index node's children are sorted by character (appending them in
+the iteration order of a hash set makes the file depend on the hash seed), and a correlation
 below 10⁻¹² counts as zero (`CORR_TOL`) instead of letting its last bit decide the direction
 of a house number range.
 

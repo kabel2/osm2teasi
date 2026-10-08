@@ -94,15 +94,6 @@ match, the device shows a warning at startup and loads the map anyway; a file wi
 is not checked. `teasi info` prints both values for a file, ready to paste into its
 `<size>` and `<md5>` (documentation section 5.4).
 
-## Performance
-
-All 14,185 records of the Danish map are taken apart and rebuilt byte-identically in 1.3 s.
-Address extraction for Denmark takes 4.7 s for all 2,628,399 entries, the osmpoi layer for
-Great Britain 35 s. The street layer for Great Britain takes 4:13 from the 2.2 GB PBF
-straight into the 531 MB chart file, the terrain layer 1:24 including reading the PBF and
-the land polygon shapefile, and the elevation grid for the whole island 3.6 s from cached
-tiles. Details in [rust/README.md](rust/README.md).
-
 ## What is not in here
 
 No device dump, no firmware, no OSM extracts, no built maps — those are several gigabytes,

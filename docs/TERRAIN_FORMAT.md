@@ -321,13 +321,9 @@ teasi terrain --country=17 \
     build/gb/GreatBritain_terrain.v20260919 20260919      # 1:24, 7.9 GB
 ```
 
-The two implementations were compared region by region, not with `teasi check` — the layer
-has no slot areas. For Denmark as for Great Britain **every elevation tile** (1034 and 1999
-respectively) came out byte-identical with the Python output, down to one byte: OpenJPEG
-writes its own version into the codestream's comment marker. The map images go through a
-different JPEG encoder (`jpeg-encoder` instead of libjpeg-turbo); about half of them are
-pixel-identical anyway, the mean deviation is 0.025 out of 255, and the files are three
-hundred-thousandths smaller.
+`teasi check` cannot look into this layer — it has no slot areas — so a region has to be
+unpacked to be inspected. Denmark holds 1034 elevation tiles and 2029 map images in 28
+regions, Great Britain 1999 and 5391 in 85.
 
 ## Surrounding files (context)
 
