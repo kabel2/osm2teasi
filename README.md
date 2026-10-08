@@ -100,17 +100,20 @@ Damit das Gerät eine neu gebaute Datei ohne Warnung annimmt, müssen Größe un
 
 ## Rust-Portierung
 
-In [rust/](rust/) liegt dieselbe Hülle in Rust: PC1, Prüfsumme, rohes LZMA1, alle
-Record-Container, der Schreiber und der Suchindex. Die Python-Werkzeuge bleiben die
-Referenz — der Abnahmetest ist, dass Rust jeden Record der Originalkarten bytegleich
-zerlegt und wieder zusammenbaut:
+In [rust/](rust/) wird die Werkzeugkette nach Rust portiert. Fertig sind die Hülle
+(PC1, Prüfsumme, rohes LZMA1, alle Record-Container, Schreiber, Suchindex) und das
+Lesen von OSM (PBF-Leser, Knoten-Index, Adressextraktion). Die Python-Werkzeuge
+bleiben die Referenz; geprüft wird gegen sie:
 
 ```bash
-cd rust && cargo build --release && ./target/release/teasi check <karten>/Denmark_*.v2*
+cd rust && cargo build --release
+./target/release/teasi check <karten>/Denmark_*.v2*      # Records bytegleich
+./target/release/teasi addr osm_ref/denmark-latest.osm.pbf
 ```
 
-Alle 14.185 Records der dänischen Karte in 1,3 s; Entschlüsseln ist 40- bis 70-mal
-schneller als in Python, Schreiben etwa 8-mal. Die Layer-Compiler sind noch nicht
+Alle 14.185 Records der dänischen Karte in 1,3 s zerlegt und bytegleich neu gebaut;
+Entschlüsseln ist 40- bis 70-mal schneller als in Python, Schreiben etwa 8-mal, die
+Adressextraktion 56-mal (Dänemark 270 s → 4,8 s). Die Layer-Compiler sind noch nicht
 portiert, Details in [rust/README.md](rust/README.md).
 
 ## Was hier nicht drin ist

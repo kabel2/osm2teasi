@@ -127,3 +127,68 @@ fn index_round_trip() {
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
 }
+
+#[test]
+fn teasi_units_match_python() {
+    // reference values from tools/osm_addr_extract.py (SCALE = 2**28 / 360)
+    for (dm_lon, dm_lat, bx, by) in [
+        (102345678i32, 553456789i32, 0x41a0e8e4adbf157fu64, 0x4178a4a06af89798u64),
+        (-17654321, 603456789, 0x419fafa739a863bc, 0x41751667876a5eb5),
+        (0, 0, 0x41a0000000000000, 0x4190000000000000),
+    ] {
+        let (x, y) = teasi::osm::xy_dm(dm_lon, dm_lat);
+        assert_eq!(x.to_bits(), bx, "x for {} {}", dm_lon, dm_lat);
+        assert_eq!(y.to_bits(), by, "y for {} {}", dm_lon, dm_lat);
+    }
+    assert_eq!(teasi::osm::SCALE.to_bits(), 0x4126c16c16c16c17);
+}
+
+#[test]
+fn node_index_keeps_what_it_was_asked_for() {
+    let mut ix = teasi::osm::NodeIndex::new(vec![7, 3, 7, 1]);
+    assert_eq!(ix.len(), 3);
+    assert!(ix.wants(3) && !ix.wants(4));
+    assert_eq!(ix.missing(), 3);
+    ix.set(3, 102345678, 553456789);
+    ix.set(4, 0, 0); // not asked for: ignored
+    assert_eq!(ix.missing(), 2);
+    assert_eq!(ix.get(3), Some(teasi::osm::xy_dm(102345678, 553456789)));
+    assert_eq!(ix.get(7), None);
+}
+
+#[test]
+fn fsum_matches_pythons_sum() {
+    // CPython's sum() compensates since 3.12; a naive loop gives 0.0 and
+    // 0.9999999999999999 here
+    assert_eq!(teasi::osm::fsum([1.0, 1e16, 1.0, -1e16].into_iter()), 2.0);
+    assert_eq!(teasi::osm::fsum(std::iter::repeat_n(0.1, 10)).to_bits(), 1.0f64.to_bits());
+}
+
+#[test]
+fn ring_centre_drops_the_repeated_point() {
+    let pts = [(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (1.0, 10.0)];
+    assert_eq!(teasi::osm::ring_centre(&pts), Some((2.0, 20.0)));
+    assert_eq!(teasi::osm::ring_centre(&pts[..3]), Some((2.0, 20.0)));
+    assert_eq!(teasi::osm::ring_centre(&[(5.0, 6.0)]), Some((5.0, 6.0)));
+    assert_eq!(teasi::osm::ring_centre(&[]), None);
+}
+
+#[test]
+fn probe_finds_the_same_ids_as_a_binary_search() {
+    let ids: Vec<i64> = (0..500).map(|i| i * 7 + 3).collect();
+    let ix = teasi::osm::NodeIndex::new(ids.clone());
+    let mut p = ix.probe();
+    for id in 0..3600i64 {
+        assert_eq!(p.wants(id), ix.wants(id), "ascending {}", id);
+    }
+    let mut p = ix.probe();
+    for id in (0..3600i64).rev() {
+        assert_eq!(p.wants(id), ix.wants(id), "descending {}", id);
+    }
+    let mut p = ix.probe();
+    for id in [3500i64, 3, 1750, 10, 3503, -5, 3496] {
+        assert_eq!(p.wants(id), ix.wants(id), "jumping {}", id);
+    }
+    let empty = teasi::osm::NodeIndex::new(vec![]);
+    assert!(!empty.probe().wants(5));
+}

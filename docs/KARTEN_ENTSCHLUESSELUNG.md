@@ -522,7 +522,14 @@ liblzma schreibt rohes LZMA1 nur als `.lzma` (13-B-Kopf abschneiden, und die Lä
 im Kopf muss „unbekannt" bleiben, sonst stört der End-Marker), und die Container
 müssen auch die unverstandenen Felder durchreichen.
 
-Die Extraktoren und die sechs Layer-Compiler sind noch nicht portiert.
+Ebenfalls portiert ist das Lesen von OSM (`osm.rs`: PBF-Leser und Knoten-Index,
+`addr.rs`: `osm_addr_extract.py`). Für Dänemark liefert es dieselben 2.628.399
+Einträge wie Python, die Knoten-Einträge bitgleich, in 4,8 statt 270 s; Abweichungen
+gibt es nur bei Mittelpunkten von Flächen (Median 2,3 m, Begründung in
+`rust/README.md`). Geprüft wird mit `rust/scripts/addr_dump.py` und
+`rust/scripts/addr_compare.py` gegen das Python-Pickle.
+
+Die übrigen Extraktoren und die sechs Layer-Compiler sind noch nicht portiert.
 
 ---
 

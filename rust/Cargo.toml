@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 anyhow = "1"
 md-5 = "0.10"
+osmpbf = "0.3.8"
 rayon = "1"
 xz2 = "0.1"
 

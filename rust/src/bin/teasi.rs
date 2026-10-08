@@ -19,6 +19,8 @@ usage: teasi <command> [arguments]
   check <chart>...           parse and rebuild every record; must be byte-identical
   roundtrip <chart> [out]    decode the whole file, write it again, compare records
   index <ta chart|table>     search index: parse, rebuild and compare
+  addr <file.osm.pbf> [out]  addresses, places and interpolation ways from OSM
+                             (out: canonical dump to compare with Python)
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
 
@@ -303,6 +305,79 @@ fn index(path: &str) -> Result<bool> {
     Ok(ok)
 }
 
+/// Clean a tag value for the canonical dump (both sides do the same).
+fn flat(s: Option<&String>) -> String {
+    s.map(|v| v.replace(['\t', '\n', '\r'], " ")).unwrap_or_default()
+}
+
+fn bits(v: f64) -> String {
+    format!("{:016x}", v.to_bits())
+}
+
+/// Extract addresses from a .osm.pbf.  With `out`, write the canonical dump
+/// that scripts/addr_dump.py produces from the Python pickle, so the two can be
+/// compared line by line.
+fn addr(path: &str, out: Option<&str>) -> Result<bool> {
+    let t0 = std::time::Instant::now();
+    let ex = teasi::addr::extract(path, &|s| println!("  {}", s))?;
+    println!(
+        "{}: {} addresses, {} places, {} interpolations in {:.1} s",
+        path.rsplit('/').next().unwrap(),
+        ex.addr.len(),
+        ex.places.len(),
+        ex.interp.len(),
+        t0.elapsed().as_secs_f32()
+    );
+    if let Some(dst) = out {
+        let mut lines: Vec<String> = Vec::with_capacity(ex.addr.len() + ex.places.len());
+        for a in &ex.addr {
+            lines.push(format!(
+                "A\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                bits(a.x),
+                bits(a.y),
+                flat(a.tags.hn.as_ref()),
+                flat(a.tags.street.as_ref()),
+                flat(a.tags.postcode.as_ref()),
+                flat(a.tags.city.as_ref()),
+                flat(a.tags.place.as_ref()),
+                flat(a.tags.suburb.as_ref())
+            ));
+        }
+        for p in &ex.places {
+            lines.push(format!(
+                "P\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                bits(p.x),
+                bits(p.y),
+                flat(p.tags.place.as_ref()),
+                flat(p.tags.name.as_ref()),
+                flat(p.tags.name_en.as_ref()),
+                flat(p.tags.population.as_ref()),
+                flat(p.tags.is_in.as_ref()),
+                if p.area { "area" } else { "" }
+            ));
+        }
+        for i in &ex.interp {
+            for (n, (x, y, hn, st)) in i.pts.iter().enumerate() {
+                lines.push(format!(
+                    "I\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    bits(*x),
+                    bits(*y),
+                    i.kind.replace(['\t', '\n', '\r'], " "),
+                    flat(i.street.as_ref()),
+                    i.pts.len(),
+                    n,
+                    flat(hn.as_ref()),
+                    flat(st.as_ref())
+                ));
+            }
+        }
+        lines.sort();
+        std::fs::write(dst, lines.join("\n") + "\n")?;
+        println!("  {} lines -> {}", lines.len(), dst);
+    }
+    Ok(true)
+}
+
 fn run() -> Result<bool> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
@@ -339,6 +414,12 @@ fn run() -> Result<bool> {
                 ok &= index(p)?;
             }
             Ok(ok)
+        }
+        "addr" => {
+            if args.len() < 2 {
+                bail!("usage: teasi addr <file.osm.pbf> [dump]");
+            }
+            addr(&args[1], args.get(2).map(|s| s.as_str()))
         }
         "check" => {
             let mut ok = true;
