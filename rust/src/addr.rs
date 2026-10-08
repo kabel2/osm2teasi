@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use osmpbf::PrimitiveBlock;
 
-use crate::osm::{area_centre, area_rings, par_blocks, xy_dm, NodeIndex};
+use crate::pbf::{area_centre, area_rings, par_blocks, xy_dm, NodeIndex};
 
 /// place=* values the Python extractor keeps.
 pub const PLACES: [&str; 13] = [

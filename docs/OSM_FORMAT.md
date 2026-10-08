@@ -361,6 +361,25 @@ Median-Verhältnis 1,00. Der Build aus `denmark-latest` (2026) hat 38 % mehr Kan
 bleiben unter denen der deutschen Karte (6,5 / 1,3 MB). Kostenfaktor (Bits 20–23) und Bit 28
 bleiben 0.
 
+### In Rust
+
+`rust/src/way.rs` (Extraktor) und `rust/src/osm.rs` (Compiler) machen dasselbe ohne Pickle,
+siehe [../rust/README.md](../rust/README.md). Die Höhen bleiben in Python und werden
+einmal exportiert:
+
+```bash
+python rust/scripts/heights_export.py build/ref/heights.pkl build/ref/heights.bin
+./target/release/teasi osm --heights=build/ref/heights.bin \
+    osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    <original>/Denmark_osm.v20210916 build/Denmark_osm.v20210916 20260918   # 66 s
+```
+
+Für Großbritannien sind **alle 22.711 Records** bytegleich mit der Python-Version
+(4:13 statt 18:23, 16,0 statt 18,0 GB), für Dänemark 5981 von 5982: dort haben 5 von
+3.004.615 Kanten einen um 1 cm anderen Anstieg, weil 16 Paare rekonstruierter
+Knotenhöhen auf derselben Position liegen und sich unterscheiden. Braucht libgeos
+(zur Laufzeit geladen).
+
 ## Offen
 
 1. Herkunft des Kostenfaktors (Bits 20–23); Bit 28; Klasse 15.

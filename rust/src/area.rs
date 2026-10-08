@@ -3,7 +3,7 @@
 //!
 //! Coordinates are the osmarea units straight away (360/2^25 degrees, rounded
 //! half to even like numpy's rint), not the 2^28 units of the other layers.
-//! Rings follow libosmium's conventions (see osm.rs): they start at their
+//! Rings follow libosmium's conventions (see pbf.rs): they start at their
 //! smallest vertex, repeat it at the end, and outer and inner are decided by
 //! nesting depth -- here the direction matters too, outer rings run clockwise
 //! in Teasi coordinates (counter-clockwise in lon/lat), holes the other way.
@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use osmpbf::PrimitiveBlock;
 
-use crate::osm::{assemble_segments, par_blocks, split_rings, NodeIndex};
+use crate::pbf::{assemble_segments, par_blocks, split_rings, NodeIndex};
 
 /// Teasi osmarea units: 360 degrees in 2^25 steps.
 pub const SCALE: f64 = (1u64 << 25) as f64 / 360.0;

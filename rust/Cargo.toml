@@ -10,6 +10,7 @@ anyhow = "1"
 md-5 = "0.10"
 osmpbf = "0.3.8"
 rayon = "1"
+unicode-normalization = "0.1"
 xz2 = "0.1"
 
 [profile.release]

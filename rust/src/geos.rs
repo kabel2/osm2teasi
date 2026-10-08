@@ -83,6 +83,17 @@ api! {
     fn GEOSIntersection_r(Ptr, Ptr, Ptr) -> Ptr;
     fn GEOSClipByRect_r(Ptr, Ptr, c_double, c_double, c_double, c_double) -> Ptr;
     fn GEOSTopologyPreserveSimplify_r(Ptr, Ptr, c_double) -> Ptr;
+    fn GEOSSimplify_r(Ptr, Ptr, c_double) -> Ptr;
+    fn GEOSGeom_createLineString_r(Ptr, Ptr) -> Ptr;
+    fn GEOSLineMerge_r(Ptr, Ptr) -> Ptr;
+    fn GEOSBufferParams_create_r(Ptr) -> Ptr;
+    fn GEOSBufferParams_destroy_r(Ptr, Ptr);
+    fn GEOSBufferParams_setEndCapStyle_r(Ptr, Ptr, c_int) -> c_int;
+    fn GEOSBufferParams_setJoinStyle_r(Ptr, Ptr, c_int) -> c_int;
+    fn GEOSBufferParams_setMitreLimit_r(Ptr, Ptr, c_double) -> c_int;
+    fn GEOSBufferParams_setQuadrantSegments_r(Ptr, Ptr, c_int) -> c_int;
+    fn GEOSBufferParams_setSingleSided_r(Ptr, Ptr, c_int) -> c_int;
+    fn GEOSBufferWithParams_r(Ptr, Ptr, Ptr, c_double) -> Ptr;
     fn GEOSContains_r(Ptr, Ptr, Ptr) -> c_char;
     fn GEOSIntersects_r(Ptr, Ptr, Ptr) -> c_char;
     fn GEOSArea_r(Ptr, Ptr, *mut c_double) -> c_int;
@@ -100,6 +111,7 @@ api! {
     fn GEOSversion() -> *const c_char;
 }
 
+const GEOS_MULTILINESTRING: c_int = 5;
 const GEOS_POLYGON: c_int = 3;
 const GEOS_MULTIPOLYGON: c_int = 6;
 const GEOS_GEOMETRYCOLLECTION: c_int = 7;
@@ -368,6 +380,69 @@ impl Geom {
             unsafe { (a.GEOSTopologyPreserveSimplify_r)(c, self.0, tolerance) },
             "simplify",
         )
+    }
+
+    /// `shapely.simplify(..., preserve_topology=False)`: plain Douglas-Peucker.
+    pub fn simplify_dp(&self, tolerance: f64) -> Result<Geom> {
+        let (a, c) = both();
+        owned(unsafe { (a.GEOSSimplify_r)(c, self.0, tolerance) }, "simplify")
+    }
+
+    /// An open polyline; at least two points.
+    pub fn linestring(pts: &[(f64, f64)]) -> Result<Geom> {
+        let (a, c) = both();
+        let s = seq(a, c, pts)?;
+        owned(unsafe { (a.GEOSGeom_createLineString_r)(c, s) }, "createLineString")
+    }
+
+    /// Collect lines into one MultiLineString; the parts are moved in.
+    pub fn multilinestring(lines: Vec<Geom>) -> Result<Geom> {
+        let (a, c) = both();
+        let mut ps: Vec<Ptr> = lines.iter().map(|g| g.0).collect();
+        std::mem::forget(lines);
+        owned(
+            unsafe {
+                (a.GEOSGeom_createCollection_r)(
+                    c,
+                    GEOS_MULTILINESTRING,
+                    ps.as_mut_ptr(),
+                    ps.len() as c_uint,
+                )
+            },
+            "createCollection",
+        )
+    }
+
+    /// `shapely.line_merge`: join lines that share an end point.
+    pub fn line_merge(&self) -> Result<Geom> {
+        let (a, c) = both();
+        owned(unsafe { (a.GEOSLineMerge_r)(c, self.0) }, "line_merge")
+    }
+
+    /// The points of a LineString or LinearRing.
+    pub fn coords(&self) -> Vec<(f64, f64)> {
+        let (a, c) = both();
+        ring_pts(a, c, self.0)
+    }
+
+    /// `shapely.buffer(self, width)` with shapely's defaults: 8 segments per
+    /// quarter circle, round caps and joins, mitre limit 5.
+    pub fn buffer(&self, width: f64) -> Result<Geom> {
+        let (a, c) = both();
+        unsafe {
+            let p = (a.GEOSBufferParams_create_r)(c);
+            if p.is_null() {
+                bail!("GEOS buffer params failed: {}", last_error());
+            }
+            (a.GEOSBufferParams_setEndCapStyle_r)(c, p, 1); // CAP_ROUND
+            (a.GEOSBufferParams_setJoinStyle_r)(c, p, 1); // JOIN_ROUND
+            (a.GEOSBufferParams_setMitreLimit_r)(c, p, 5.0);
+            (a.GEOSBufferParams_setQuadrantSegments_r)(c, p, 8);
+            (a.GEOSBufferParams_setSingleSided_r)(c, p, 0);
+            let g = (a.GEOSBufferWithParams_r)(c, self.0, p, width);
+            (a.GEOSBufferParams_destroy_r)(c, p);
+            owned(g, "buffer")
+        }
     }
 
     pub fn contains(&self, o: &Geom) -> bool {

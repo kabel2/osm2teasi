@@ -36,7 +36,7 @@ Jedes Format hat ein eigenes Dokument in [docs/](docs/), jeweils mit einem Absch
 ```
 tools/            Die Werkzeugkette: Hülle lesen/schreiben, Extraktoren, Compiler
 docs/             Formatdokumentation (deutsch), Einstieg: KARTEN_ENTSCHLUESSELUNG.md
-rust/             Rust-Portierung: Hülle, OSM lesen, drei Layer-Compiler
+rust/             Rust-Portierung: Hülle, OSM lesen, vier Layer-Compiler
 ghidra_scripts/   Headless-Skripte für die Firmware-Analyse in Ghidra
 attic/            Einmal-Skripte aus der Analysephase, nicht gepflegt
 ```
@@ -102,8 +102,8 @@ Damit das Gerät eine neu gebaute Datei ohne Warnung annimmt, müssen Größe un
 
 In [rust/](rust/) wird die Werkzeugkette nach Rust portiert. Fertig sind die Hülle
 (PC1, Prüfsumme, rohes LZMA1, alle Record-Container, Schreiber, Suchindex), das Lesen
-von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und drei Layer-Compiler
-(`osmpoi`, `osmpoint` und `osmarea`, vom Extrakt direkt in die Kartendatei). Die
+von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und vier Layer-Compiler
+(`osmpoi`, `osmpoint`, `osmarea` und `osm`, vom Extrakt direkt in die Kartendatei). Die
 Python-Werkzeuge bleiben die Referenz; geprüft wird gegen sie:
 
 ```bash
@@ -119,9 +119,10 @@ Adressextraktion 56-mal (Dänemark 270 s → 4,7 s, alle 2.628.399 Einträge bit
 Der osmpoi-Layer für Großbritannien braucht 35 s statt 24 min allein für die
 Extraktion. Für Dänemark sind alle osmpoi- und osmpoint-Records bytegleich mit der
 Python-Version, beim Flächenlayer 308 von 340 — der Rest sind Multipolygone, die
-libosmiums Zusammenbau anders aufteilt. `osmarea` braucht libgeos (zur Laufzeit
-geladen, siehe `rust/src/geos.rs`). Die drei übrigen Compiler fehlen noch, Details in
-[rust/README.md](rust/README.md).
+libosmiums Zusammenbau anders aufteilt. Beim Straßenlayer sind **alle 22.711 Records**
+der britischen Karte bytegleich (4:13 statt 18:23), in Dänemark 5981 von 5982.
+`osmarea` und `osm` brauchen libgeos (zur Laufzeit geladen, siehe `rust/src/geos.rs`).
+Die zwei übrigen Compiler fehlen noch, Details in [rust/README.md](rust/README.md).
 
 ## Was hier nicht drin ist
 

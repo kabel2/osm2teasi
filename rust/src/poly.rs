@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::osm::xy;
+use crate::pbf::xy;
 
 /// One ring of the boundary; holes are cut out of the enclosing rings.
 pub struct Ring {

@@ -136,23 +136,23 @@ fn teasi_units_match_python() {
         (-17654321, 603456789, 0x419fafa739a863bc, 0x41751667876a5eb5),
         (0, 0, 0x41a0000000000000, 0x4190000000000000),
     ] {
-        let (x, y) = teasi::osm::xy_dm(dm_lon, dm_lat);
+        let (x, y) = teasi::pbf::xy_dm(dm_lon, dm_lat);
         assert_eq!(x.to_bits(), bx, "x for {} {}", dm_lon, dm_lat);
         assert_eq!(y.to_bits(), by, "y for {} {}", dm_lon, dm_lat);
     }
-    assert_eq!(teasi::osm::SCALE.to_bits(), 0x4126c16c16c16c17);
+    assert_eq!(teasi::pbf::SCALE.to_bits(), 0x4126c16c16c16c17);
 }
 
 #[test]
 fn node_index_keeps_what_it_was_asked_for() {
-    let mut ix = teasi::osm::NodeIndex::new(vec![7, 3, 7, 1]);
+    let mut ix = teasi::pbf::NodeIndex::new(vec![7, 3, 7, 1]);
     assert_eq!(ix.len(), 3);
     assert!(ix.wants(3) && !ix.wants(4));
     assert_eq!(ix.missing(), 3);
     ix.set(3, 102345678, 553456789);
     ix.set(4, 0, 0); // not asked for: ignored
     assert_eq!(ix.missing(), 2);
-    assert_eq!(ix.get(3), Some(teasi::osm::xy_dm(102345678, 553456789)));
+    assert_eq!(ix.get(3), Some(teasi::pbf::xy_dm(102345678, 553456789)));
     assert_eq!(ix.get(7), None);
 }
 
@@ -160,13 +160,13 @@ fn node_index_keeps_what_it_was_asked_for() {
 fn fsum_matches_pythons_sum() {
     // CPython's sum() compensates since 3.12; a naive loop gives 0.0 and
     // 0.9999999999999999 here
-    assert_eq!(teasi::osm::fsum([1.0, 1e16, 1.0, -1e16].into_iter()), 2.0);
-    assert_eq!(teasi::osm::fsum(std::iter::repeat_n(0.1, 10)).to_bits(), 1.0f64.to_bits());
+    assert_eq!(teasi::pbf::fsum([1.0, 1e16, 1.0, -1e16].into_iter()), 2.0);
+    assert_eq!(teasi::pbf::fsum(std::iter::repeat_n(0.1, 10)).to_bits(), 1.0f64.to_bits());
 }
 
 #[test]
 fn segments_build_rings_and_cancel_in_pairs() {
-    use teasi::osm::assemble_segments;
+    use teasi::pbf::assemble_segments;
     let p = |x: i32, y: i32| (x, y);
     // two open ways forming one ring, the second one reversed
     let ways = vec![
@@ -197,7 +197,7 @@ fn segments_build_rings_and_cancel_in_pairs() {
 
 #[test]
 fn a_ring_touching_itself_is_split() {
-    use teasi::osm::split_rings;
+    use teasi::pbf::split_rings;
     let p = |x: i32, y: i32| (x, y);
     // a figure of eight through (4,4): two rings, each starting at the touch
     let eight =
@@ -216,7 +216,7 @@ fn a_ring_touching_itself_is_split() {
 
 #[test]
 fn an_inner_ring_does_not_count_towards_the_centre() {
-    use teasi::osm::area_centre;
+    use teasi::pbf::area_centre;
     // a 10 x 10 square with a small ring inside it: the centre is the square's
     let outer = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)];
     let inner = vec![(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0), (4.0, 4.0)];
@@ -230,7 +230,7 @@ fn an_inner_ring_does_not_count_towards_the_centre() {
 #[test]
 fn probe_finds_the_same_ids_as_a_binary_search() {
     let ids: Vec<i64> = (0..500).map(|i| i * 7 + 3).collect();
-    let ix = teasi::osm::NodeIndex::new(ids.clone());
+    let ix = teasi::pbf::NodeIndex::new(ids.clone());
     let mut p = ix.probe();
     for id in 0..3600i64 {
         assert_eq!(p.wants(id), ix.wants(id), "ascending {}", id);
@@ -243,7 +243,7 @@ fn probe_finds_the_same_ids_as_a_binary_search() {
     for id in [3500i64, 3, 1750, 10, 3503, -5, 3496] {
         assert_eq!(p.wants(id), ix.wants(id), "jumping {}", id);
     }
-    let empty = teasi::osm::NodeIndex::new(vec![]);
+    let empty = teasi::pbf::NodeIndex::new(vec![]);
     assert!(!empty.probe().wants(5));
 }
 
@@ -336,12 +336,12 @@ fn poly_contains_counts_holes() {
 // osmpoint (tools/compile_osmpoint.py); all expected values printed by it
 // --------------------------------------------------------------------------
 
-fn seamark(pairs: &[(&str, &str)]) -> teasi::osm::TagMap {
-    teasi::osm::TagMap::of(pairs.iter().copied())
+fn seamark(pairs: &[(&str, &str)]) -> teasi::pbf::TagMap {
+    teasi::pbf::TagMap::of(pairs.iter().copied())
 }
 
 /// cat, body colour, topmark, attribute string, label and the sectors.
-fn point(ty: &str, t: &teasi::osm::TagMap) -> (u32, u32, u32, String, String, usize) {
+fn point(ty: &str, t: &teasi::pbf::TagMap) -> (u32, u32, u32, String, String, usize) {
     use teasi::osmpoint::*;
     let ls = lights(t);
     (
@@ -631,4 +631,156 @@ fn osmarea_record_round_trip() {
     assert_eq!(parts[1].0, 9);
     let Var::U16(name) = &rec.get("c6", &C_SPEC)[0].v[0] else { panic!("name") };
     assert_eq!(layers::u16str(name), "#OW");
+}
+
+// --------------------------------------------------------------------------
+// the osm layer: tag tables, geometry and the name table
+// --------------------------------------------------------------------------
+
+fn wtags(pairs: &[(&str, &str)]) -> teasi::pbf::TagMap {
+    teasi::pbf::TagMap::of(pairs.iter().copied())
+}
+
+/// Values from tools/compile_osm.py: road_class, flags with and without route
+/// relations, passable and category.
+#[test]
+fn road_attributes_match_python() {
+    use teasi::osm::{flags, road_class};
+    let rels: Vec<teasi::way::Route> = vec![
+        ("bicycle".into(), Some("lcn".into()), None),
+        ("hiking".into(), None, Some("E1".into())),
+        ("mtb".into(), Some("icn".into()), None),
+    ];
+    let cases: [(&[(&str, &str)], Option<u32>, u32, u32); 6] = [
+        (
+            &[("highway", "residential"), ("surface", "asphalt"), ("lanes", "2"), ("oneway", "yes")],
+            Some(7),
+            134498946,
+            19072,
+        ),
+        (
+            &[("highway", "cycleway"), ("bicycle", "designated"), ("mtb:scale", "1")],
+            Some(10),
+            134481826,
+            1952,
+        ),
+        (
+            &[("highway", "track"), ("surface", "sett"), ("access", "private"), ("foot", "permissive")],
+            Some(12),
+            2281964306,
+            2147484432,
+        ),
+        (
+            &[("highway", "footway"), ("cycleway", "lane"), ("bicycle", "dismount"), ("lanes", "x")],
+            Some(11),
+            1745094530,
+            1610614656,
+        ),
+        (&[("route", "ferry")], Some(9), 134480770, 896),
+        (
+            &[("highway", "primary"), ("junction", "roundabout"), ("name:de", "X"), ("name", "Y")],
+            Some(2),
+            134482819,
+            2945,
+        ),
+    ];
+    for (pairs, cls, with, without) in cases {
+        let t = wtags(pairs);
+        assert_eq!(road_class(&t), cls, "class of {:?}", pairs);
+        assert_eq!(flags(&t, &rels), with, "flags of {:?}", pairs);
+        assert_eq!(flags(&t, &[]), without, "flags without routes of {:?}", pairs);
+    }
+    // area=yes is not a road, a ferry with a highway tag goes by the highway
+    assert_eq!(road_class(&wtags(&[("highway", "primary"), ("area", "yes")])), None);
+    assert_eq!(road_class(&wtags(&[("route", "ferry"), ("highway", "service")])), Some(7));
+}
+
+#[test]
+fn line_types_match_python() {
+    use teasi::osm::{line_type, LineType};
+    let a3 = |t: &[(&str, &str)]| line_type(&wtags(t));
+    assert_eq!(a3(&[("railway", "tram")]), Some(LineType::A3(0)));
+    assert_eq!(a3(&[("man_made", "pier")]), Some(LineType::A3(4)));
+    assert_eq!(a3(&[("power", "line")]), Some(LineType::A3(10)));
+    assert_eq!(a3(&[("waterway", "ditch")]), None); // only when named
+    assert_eq!(
+        a3(&[("waterway", "ditch"), ("name", "Gr\u{f8}ften")]),
+        Some(LineType::A4(7, "Gr\u{f8}ften".into()))
+    );
+    assert_eq!(
+        a3(&[("waterway", "river"), ("name", "Guden\u{e5}"), ("name:de", "Guden"), ("name:en", "Guden")]),
+        Some(LineType::A4(7, "[DANGuden\u{e5}\u{a6}GERGuden\u{a6}ENGGuden]".into()))
+    );
+    // the orientation is rounded half to even and prefixed to the label
+    assert_eq!(
+        a3(&[("seamark:type", "navigation_line"), ("seamark:navigation_line:orientation", "12.5")]),
+        Some(LineType::A4(8, "12(leading)".into()))
+    );
+    assert_eq!(
+        a3(&[("seamark:type", "recommended_track"), ("seamark:recommended_track:orientation", "x")]),
+        Some(LineType::A4(9, "(fixed_marks)".into()))
+    );
+    assert_eq!(
+        a3(&[("seamark:type", "recommended_track")]),
+        Some(LineType::A4(9, "(fixed_marks)".into()))
+    );
+}
+
+#[test]
+fn clipping_and_packing_match_python() {
+    let pts = [(0.0, 0.0), (100.0, 50.0), (200.0, -20.0)];
+    let parts = teasi::osm::clip(&pts, 10.0, -10.0, 150.0, 40.0);
+    assert_eq!(
+        parts,
+        vec![
+            vec![(10.0, 5.0), (80.0, 40.0)],
+            vec![(114.28571428571428, 40.0), (150.0, 15.0)],
+        ]
+    );
+    // repeated points are dropped, the coordinates are rounded half to even
+    let geo = teasi::osm::encode_parts(
+        &[vec![(100.4, 200.5), (100.4, 200.5), (300.5, 400.5)]],
+        0.0,
+        0.0,
+    );
+    assert_eq!(geo, vec![131074, 46662244, 59769644]);
+    // the bbox of a line near a cell corner offers four cells ...
+    assert_eq!(
+        teasi::osm::cells_of(32000.0, 33000.0, 65000.0, 70000.0),
+        vec![(0, 1), (0, 2), (1, 1), (1, 2)]
+    );
+    // ... but (1, 1) stays empty after the clip, so only three carry geometry
+    let cells: Vec<(i64, i64)> = teasi::osm::place(&[(32000.0, 65000.0), (33000.0, 70000.0)])
+        .into_iter()
+        .map(|(c, _)| c)
+        .collect();
+    assert_eq!(cells, vec![(0, 1), (0, 2), (1, 2)]);
+}
+
+#[test]
+fn name_table_matches_python() {
+    // casefold, Danish letters spelled out, accents dropped
+    for (name, key) in [
+        ("\u{c5}gade", "agade"),
+        ("\u{c6}blevej", "aeblevej"),
+        ("\u{d8}stergade", "ostergade"),
+        ("Stra\u{df}e", "strasse"),
+        ("\u{e9}cole", "ecole"),
+        ("\u{c6}r\u{f8}vej", "aerovej"),
+    ] {
+        assert_eq!(teasi::osm::sort_key(name), key, "sort key of {}", name);
+    }
+    let names: Vec<String> =
+        ["\u{d8}ster All\u{e9}", "Aagade", "\u{d8}ster Vej"].iter().map(|s| s.to_string()).collect();
+    let (blk5, blk6, index) = teasi::osm::name_table(&names);
+    assert_eq!(
+        blk5,
+        vec![0, 0, 0, 1, 14, 0, 0, 2, 26, 0, 0, 0, 14, 0, 0, 2, 36, 0, 0, 0]
+    );
+    // the words are UTF-16LE with a length but no NUL, and shared between names
+    assert_eq!(&blk6[..4], &[6, 0, b'A', 0]);
+    assert_eq!(blk6.len(), 44);
+    assert_eq!(index["Aagade"], 0);
+    assert_eq!(index["\u{d8}ster All\u{e9}"], 4);
+    assert_eq!(index["\u{d8}ster Vej"], 12);
 }

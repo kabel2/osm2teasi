@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 
 use crate::layers::{build_osmpoint, u16enc, PointObj, PointRec, Sector, LAYER_OSMPOINT};
-use crate::osm::TagMap;
+use crate::pbf::TagMap;
 use crate::osmpoi::round_even;
 use crate::poi::Cand;
 use crate::poly::{self, Ring};

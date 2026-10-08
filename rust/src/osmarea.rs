@@ -549,10 +549,16 @@ pub fn record(cell: (i64, i64), objs: &BTreeMap<&str, Vec<Item>>) -> Vec<u8> {
 
 /// The boundary polygon of a .poly file in osmarea units.
 pub fn boundary(rings: &[crate::poly::Ring]) -> Result<Geom> {
+    boundary_at(rings, 8.0)
+}
+
+/// The same with a divisor: the `.poly` files are read in 2^28 units, the
+/// osmarea layer wants 2^25 (divisor 8), the osm layer 2^28 (divisor 1).
+pub fn boundary_at(rings: &[crate::poly::Ring], div: f64) -> Result<Geom> {
     let mut outer = Vec::new();
     let mut holes = Vec::new();
     for r in rings {
-        let pts: Vec<(f64, f64)> = r.pts.iter().map(|&(x, y)| (x / 8.0, y / 8.0)).collect();
+        let pts: Vec<(f64, f64)> = r.pts.iter().map(|&(x, y)| (x / div, y / div)).collect();
         let g = Geom::polygon(&pts, &[])?;
         if r.hole {
             holes.push(g);

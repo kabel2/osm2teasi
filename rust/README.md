@@ -3,12 +3,13 @@
 Portierung der Werkzeugkette nach Rust. Fertig sind **die Hülle** (Stufe 1:
 Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex),
 **das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion) und
-**drei Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint` und `osmarea`, aus dem PBF
-direkt in die Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben die
-Referenz; was hier steht, muss dasselbe liefern.
+**vier Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint`, `osmarea` und `osm`, aus dem
+PBF direkt in die Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben
+die Referenz; was hier steht, muss dasselbe liefern.
 
-Noch nicht portiert: die drei übrigen Layer-Compiler (`compile_osm.py`,
-`compile_ta.py`, `compile_terrain.py`).
+Noch nicht portiert: die zwei übrigen Layer-Compiler (`compile_ta.py`,
+`compile_terrain.py`) und die Höhenquellen selbst (`osm_heights.py`,
+`dem_heights.py` — ihre Ergebnisse liest Rust, s. u.).
 
 ## Stand
 
@@ -19,7 +20,7 @@ Noch nicht portiert: die drei übrigen Layer-Compiler (`compile_osm.py`,
 | Container A, B, C, D, osmpoint | `layers.py` | `layers.rs` |
 | Dateien schreiben, Gerätebindung | `writer.py` | `writer.rs` |
 | Suchindex der Adresssuche | `ta_index.py` | `ta_index.rs` |
-| OSM-PBF lesen, Knoten-Index | pyosmium | `osm.rs` |
+| OSM-PBF lesen, Knoten-Index | pyosmium | `pbf.rs` |
 | Adressen, Orte, Interpolationswege | `osm_addr_extract.py` | `addr.rs` |
 | Landesgrenze (`.poly`) | `poly.py` | `poly.rs` |
 | POIs lesen | `osm_poi_extract.py` | `poi.rs` |
@@ -29,8 +30,10 @@ Noch nicht portiert: die drei übrigen Layer-Compiler (`compile_osm.py`,
 | Weltweite Landpolygone (Shapefile) | `land_extract.py` | `land.rs` |
 | Geometrie (GEOS) | shapely | `geos.rs` |
 | Layer `osmarea` bauen | `compile_osmarea.py` | `osmarea.rs` |
-| Straßen und Höhen lesen | `osm_extract.py` u. a. | – |
-| Die drei übrigen Layer bauen | `compile_*.py` | – |
+| Straßen- und Linien-Ways lesen | `osm_extract.py` | `way.rs` |
+| Höhen einlesen und abfragen | `osm_heights.py`, `dem_heights.py` | `heights.rs` |
+| Layer `osm` bauen | `compile_osm.py` | `osm.rs` |
+| Die zwei übrigen Layer bauen | `compile_ta.py`, `compile_terrain.py` | – |
 
 ## Bauen und prüfen
 
@@ -66,6 +69,8 @@ osmpoint 110) in 1,3 s.
 | `teasi area <datei.osm.pbf> <aus>` | Flächen und Küstenlinie als kanonischer Dump |
 | `teasi land <land_polygons.shp> <poly>` | Zahl und Fläche der weltweiten Landpolygone |
 | `teasi osmarea <pbf> <poly> <original\|-> <karte> [datum]` | den osmarea-Layer bauen (`--country=N`, `--land=…`) |
+| `teasi ways <datei.osm.pbf> <aus>` | Straßen- und Linien-Ways als kanonischer Dump |
+| `teasi osm <pbf> <poly> <original\|-> <karte> [datum]` | den osm-Layer bauen (`--country=N`, `--name=…`, `--heights=…`) |
 
 Die Seriennummer kommt wie bei den Python-Werkzeugen aus `TEASI_DEVICE`
 (Standard: die in `chart.rs`).
@@ -93,7 +98,7 @@ sich nicht mehr wesentlich drücken.
 
 ## Stufe 2: OSM lesen
 
-`osm.rs` liest `.osm.pbf`-Dateien (Crate `osmpbf`), dekodiert die Blöcke parallel und
+`pbf.rs` liest `.osm.pbf`-Dateien (Crate `osmpbf`), dekodiert die Blöcke parallel und
 faltet sie in Akkumulatoren pro Thread. Dazu der Knoten-Index: pyosmium hält einen
 Index **aller** Knoten der Datei im RAM, hier werden nur die Ids gesammelt, die ein
 früherer Durchgang angefordert hat — sortiert, 16 Byte pro Knoten.
@@ -138,7 +143,7 @@ Die drei Durchgänge brauchen für Großbritannien 6, 8 und 11 s; ein Durchgang 
 
 Alles, was an einer Fläche hängt — der Mittelpunkt einer Adresse, die Position eines
 POIs, die Ringe des osmarea-Layers — kommt in Python von libosmium. Dessen
-Flächenbau ist in `osm.rs` nachgebaut (`assemble_segments`, `split_rings`,
+Flächenbau ist in `pbf.rs` nachgebaut (`assemble_segments`, `split_rings`,
 `area_loc_rings`), und zwar so:
 
 - **Aus Kanten, nicht aus Wegen.** Jede Kante (Knotenpaar) wird so normiert, dass der
@@ -257,8 +262,8 @@ braucht es keine Crate. `osmarea.rs` ist der Compiler selbst.
 
 `geos.rs` lädt `libgeos_c` per `dlopen`, bindet nur die rund 40 benutzten Funktionen
 und hält pro Thread einen GEOS-Kontext. Der Vorteil: `cargo build` braucht weder GEOS
-noch dessen Header, nur `teasi osmarea` braucht die Bibliothek — und man kann genau die
-nehmen, die shapely benutzt. Gesucht wird `$TEASI_GEOS`, dann `libgeos_c.so.1`, dann
+noch dessen Header, nur `teasi osmarea` und `teasi osm` brauchen die Bibliothek — und
+man kann genau die nehmen, die shapely benutzt. Gesucht wird `$TEASI_GEOS`, dann `libgeos_c.so.1`, dann
 `libgeos_c.so`:
 
 ```bash
@@ -315,6 +320,90 @@ Das Meer ist dabei der aufwendigste Teil und stimmt vollständig: die Küstenlin
 zu Ketten zusammengesetzt (Land links, offene Ketten gerade geschlossen), außerhalb der
 Grenze kommt `#OW` aus der Originaldatei, und deren Ringe werden mit der
 Even-Odd-Regel paarweise in einem Baum verrechnet.
+
+## Stufe 3: der Layer osm
+
+Der größte Compiler: `compile_osm.py` baut aus den Straßen-Ways vier Record-Arten —
+**D** mit den Kanten und Linien, **A** mit der Namenstabelle, **B** mit dem
+Routing-Graphen und **C** mit den Übersichtslinien. Python rechnet das mit numpy über
+das ganze Land und braucht dafür 18 GB; hier sind es flache `Vec`s mit denselben
+Indexspalten.
+
+```bash
+./target/release/teasi ways osm_ref/denmark-latest.osm.pbf ways.txt   # nur der Extraktor
+./target/release/teasi osm --heights=build/ref/heights.bin \
+    osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    <original>/Denmark_osm.v20210916 build/Denmark_osm.v20210916 20260918
+# Land ohne Originaldatei: c2/c4 bleiben leer, nichts wird kopiert
+./target/release/teasi osm --heights=build/gb/dem.bin --country=17 "--name=United Kingdom" \
+    osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly - \
+    build/GreatBritain_osm.v20260918 20260918
+```
+
+`way.rs` ist `osm_extract.py`: die Ways, die `road_class` oder `line_type` annimmt, mit
+ihren Knoten-Ids, dann die Koordinaten dieser Knoten. Das entspricht `--filter` auf der
+Python-Seite; die Ways, die Python ohne den Schalter zusätzlich behält, können die
+Ausgabe nicht erreichen (der Compiler sieht nur Straßen und Linien, und die Knotenzeilen
+der übrigen gehen in keine Rechnung ein). `osm.rs` ist der Compiler.
+
+Die Reihenfolge der Ways entscheidet, wie gleichrangige Einträge in einem Record
+sortiert werden. Python nimmt sie, wie libosmium sie liefert — die Reihenfolge der
+Datei, und die Geofabrik-Auszüge sind nach Id sortiert. Rust dekodiert die Blöcke
+parallel und sortiert deshalb danach ausdrücklich nach der Way-Id.
+
+### Höhen
+
+Der Anstieg einer Kante (B-Kantenwort [2]) kommt aus Knotenhöhen, und die stammen
+entweder aus dem Routing-Graphen einer Originaldatei (`osm_heights.py`, scipys `lsqr`
+über 2,1 Mio. Gleichungen) oder aus dem Copernicus-Höhenmodell (`dem_heights.py`,
+Kacheln vom AWS-Bucket, Gauß-Glättung). Beides sind Einmal-Rechnungen und bleiben in
+Python; `scripts/heights_export.py` schreibt ihr Pickle in eine flache Binärdatei, die
+`heights.rs` liest:
+
+```bash
+python scripts/heights_export.py build/ref/heights.pkl build/ref/heights.bin
+```
+
+Für die Knotenhöhen braucht es die 4 nächsten Nachbarn (inverse Distanz²). Statt eines
+kd-Baums wie scipy liegt hier ein gleichmäßiges Raster über den bekannten Punkten, das
+ringweise nach außen durchsucht wird, bis der nächste Ring nicht mehr näher sein kann —
+dasselbe Ergebnis, nur ohne Baum.
+
+### Geprüft gegen Python
+
+Zweistufig wie bei den anderen Layern:
+
+```bash
+./target/release/teasi ways osm_ref/denmark-latest.osm.pbf rs.txt
+python scripts/ways_dump.py build/ref/ways_latest.pkl py.txt
+python scripts/ways_compare.py py.txt rs.txt
+./target/release/teasi md5s <python.v20210916> ; ./target/release/teasi md5s <rust.v20210916>
+```
+
+`ways_dump.py` schreibt je Way Klasse bzw. Linientyp, Flags, Zeilenzahl, Name und eine
+MD5 über Knoten-Ids und Koordinaten (als IEEE-Bitmuster) — damit stehen auch die
+Tag-Tabellen auf dem Prüfstand.
+
+| | Dänemark | Großbritannien |
+|---|---|---|
+| Ways bitgleich (Extraktor) | **alle 1.538.105** | – |
+| Records bitgleich | 5981 von 5982 | **alle 22.711** |
+| Dateigröße | 92.253.033 B (Python 92.253.016) | **531.333.357 B, identisch** |
+| Laufzeit (PBF → Kartendatei) | 66 s | 4:13, 16,0 GB |
+| Python (ab Pickle) | 282 s + 2 min Extraktion | 18:23, 18,0 GB + 12 min Extraktion |
+
+Alle Zwischenzahlen stimmen auf den Eintrag: 1.454.524 Straßen und 83.581 Linien,
+1.816.001 geteilte Knoten, 3.004.615 Kanten, 2.404.747 Graph-Knoten in 354 B-Zellen
+(336 behalten), 134 A-, 336 B-, 5129 D- und 95 C-Records, 21 Tiles samt den drei
+kopierten Färöer-Kacheln — für Großbritannien entsprechend 7.861.689/619.761,
+15.029.377 Kanten, 12.119.884 Graph-Knoten, 20.507 D-Records.
+
+Der einzige abweichende Record Dänemarks ist eine B-Zelle, in der **5 von 3.004.615
+Kanten** einen um 1 cm anderen Anstieg haben. Ursache sind 16 Paare bekannter
+Knotenhöhen, die auf **derselben Position** liegen und verschiedene Höhen tragen (bis
+zu 6 cm auseinander, Rekonstruktionsrauschen von `lsqr`); welcher der beiden in den
+Mittelwert der 4 Nachbarn eingeht, ist in beiden Implementierungen Zufall. Großbritannien
+nimmt den Rasterweg und ist deshalb vollständig identisch.
 
 ## Zwei Fallen
 

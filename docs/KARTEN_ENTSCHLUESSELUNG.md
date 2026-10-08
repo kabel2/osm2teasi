@@ -522,12 +522,12 @@ liblzma schreibt rohes LZMA1 nur als `.lzma` (13-B-Kopf abschneiden, und die Lä
 im Kopf muss „unbekannt" bleiben, sonst stört der End-Marker), und die Container
 müssen auch die unverstandenen Felder durchreichen.
 
-Ebenfalls portiert ist das Lesen von OSM (`osm.rs`: PBF-Leser und Knoten-Index,
+Ebenfalls portiert ist das Lesen von OSM (`pbf.rs`: PBF-Leser und Knoten-Index,
 `addr.rs`: `osm_addr_extract.py`). Für Dänemark liefert es alle 2.628.399 Einträge
 **bitgleich**, in 4,7 statt 270 s; für Großbritannien 5.023.341 der 5.023.358 Adressen und 111.338 der 111.340 Orte bitgleich. Geprüft wird mit
 `rust/scripts/addr_dump.py` und `rust/scripts/addr_compare.py` gegen das Pickle.
 
-Dass die Flächen überhaupt stimmen, liegt an libosmiums Flächenbau, der in `osm.rs`
+Dass die Flächen überhaupt stimmen, liegt an libosmiums Flächenbau, der in `pbf.rs`
 nachgebaut ist: aus **Kanten**, die normiert und sortiert werden und sich paarweise
 auslöschen, wenn sie doppelt vorkommen (so verschmelzen zwei aneinander entlanglaufende
 Wege zu einem Ring); verglichen werden Orte, nicht Knoten-Ids; ein Ring, der sich selbst
@@ -536,7 +536,7 @@ wiederholt ihn am Ende; außen/innen entscheidet die Verschachtelung, nicht die
 Member-Rolle; und `area=no` verbietet die Fläche. Ohne das lagen 4,3 von 5,0 Mio.
 britischen Adressen um Median 1,6 m daneben.
 
-Drei Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
+Vier Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
 `osmpoint.rs`, alles in einem Lauf über das PBF (Großbritannien 35 bzw. 17 s statt
 24 min allein für die Extraktion); für Dänemark sind alle 3699 osmpoi- und alle 128
 osmpoint-Records bytegleich mit der Python-Version, für Großbritannien
@@ -545,16 +545,30 @@ Flächenlayer: 308 von 340 dänischen Records bytegleich, 1029 von 1157 britisch
 abweicht, sind Multipolygone mit sich selbst berührenden Ringen, die libosmium anders
 aufteilt.
 
+`osm.rs` (mit `way.rs` für die Ways und `heights.rs` für die Anstiege) baut den
+Straßenlayer: für Großbritannien sind **alle 22.711 Records** bytegleich und die Datei
+ist auf das Byte so groß wie die von Python (531.333.357 B), in 4:13 statt 18:23 und mit
+16,0 statt 18,0 GB. Für Dänemark 5981 von 5982 Records; der eine Unterschied sind 5 von
+3.004.615 Kanten mit einem um 1 cm anderen Anstieg, weil 16 Paare bekannter Knotenhöhen
+auf derselben Position liegen und verschiedene Höhen tragen — welche davon in den
+Mittelwert der 4 Nachbarn eingeht, ist Zufall. Alle 1.538.105 dänischen Ways kommen
+bitgleich aus dem Extraktor, Tag-Tabellen und Flags eingeschlossen. Die Höhenquellen
+selbst (`osm_heights.py` mit scipys `lsqr`, `dem_heights.py` mit dem Copernicus-Modell)
+bleiben in Python; `rust/scripts/heights_export.py` schreibt ihr Pickle in eine flache
+Binärdatei für `--heights=`.
+
 ```bash
 ./target/release/teasi osmpoi  <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osmpoint <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osmarea <pbf> <poly> <original|-> <ausgabe> [JJJJMMTT] --country=17
+./target/release/teasi osm <pbf> <poly> <original|-> <ausgabe> [JJJJMMTT] --country=17 \
+    "--name=United Kingdom" --heights=<datei.bin>
 ./target/release/teasi md5s <karte>   # auf beiden Dateien, dann diff
 ```
 
-`osmarea` braucht **libgeos** (shapely benutzt es auch, und bitgleich wird es nur mit
-derselben Version): `geos.rs` lädt die Bibliothek zur Laufzeit per `dlopen`, zu finden
-über `TEASI_GEOS`. Der Build selbst braucht sie nicht. Eine Änderung ging zurück nach
+`osmarea` und `osm` brauchen **libgeos** (shapely benutzt es auch, und bitgleich wird es
+nur mit derselben Version): `geos.rs` lädt die Bibliothek zur Laufzeit per `dlopen`, zu
+finden über `TEASI_GEOS`. Der Build selbst braucht sie nicht. Eine Änderung ging zurück nach
 Python: `compile_osmarea.py` sortiert die Flächen jetzt nach ihrer osmium-Id, denn die
 Reihenfolge des Extraktors (libosmiums Puffer-Reihenfolge) entscheidet mit, welches
 Polygon in einer Vereinigung zuerst liegt, und ist nicht nachbaubar.

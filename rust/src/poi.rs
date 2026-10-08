@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use osmpbf::PrimitiveBlock;
 
-use crate::osm::{area_centre, area_rings, mean, par_blocks, xy_dm, NodeIndex, TagMap};
+use crate::pbf::{area_centre, area_rings, mean, par_blocks, xy_dm, NodeIndex, TagMap};
 use crate::osmpoi::{attributes, poi_type, tags_of, PoiFields, Tags, K};
 
 /// One object with everything the two layers need of it.

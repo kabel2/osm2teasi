@@ -35,6 +35,11 @@ usage: teasi <command> [arguments]
                              sea outside the boundary, without one pass
                              --land=<land_polygons.shp> (needs libgeos, see
                              src/geos.rs)
+  ways <file.osm.pbf> <out>  the road and line ways as a canonical dump
+  osm <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]
+                             compile the street layer; --heights=<file> adds the
+                             ascents (scripts/heights_export.py), --name=<country>
+                             the country name of the A records (needs libgeos)
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
 
@@ -533,6 +538,90 @@ fn land(shp: &str, area: &str) -> Result<()> {
     Ok(())
 }
 
+/// Canonical dump of the way extractor, to compare with the Python pickle.
+fn ways(path: &str, dst: &str) -> Result<()> {
+    let w = teasi::way::extract(path, &|s| println!("  {}", s))?;
+    let mut out = std::io::BufWriter::new(std::fs::File::create(dst)?);
+    for k in 0..w.ids.len() {
+        let t = &w.tags[k];
+        let rows = w.nodes(k);
+        let mut h = Md5::new();
+        for i in rows.clone() {
+            h.update(w.nid[i].to_le_bytes());
+            h.update(w.x[i].to_bits().to_le_bytes());
+            h.update(w.y[i].to_bits().to_le_bytes());
+        }
+        let md5 = format!("{:x}", h.finalize())[..8].to_string();
+        let rels = w.rels.get(&w.ids[k]).map_or(&[][..], |v| &v[..]);
+        let (kind, ty, name) = match teasi::osm::road_class(t) {
+            Some(c) => ("r", c, t.get("name").unwrap_or("").to_string()),
+            None => match teasi::osm::line_type(t) {
+                Some(teasi::osm::LineType::A3(ty)) => ("3", ty, String::new()),
+                Some(teasi::osm::LineType::A4(ty, nm)) => ("4", ty, nm),
+                None => ("-", 0, String::new()),
+            },
+        };
+        writeln!(
+            out,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            w.ids[k],
+            kind,
+            ty,
+            teasi::osm::flags(t, rels),
+            rows.len(),
+            md5,
+            name
+        )?;
+    }
+    println!("{} ways -> {}", w.ids.len(), dst);
+    Ok(())
+}
+
+fn compile_osm(
+    args: &[String],
+    country: u32,
+    name: &str,
+    heights: Option<&str>,
+) -> Result<bool> {
+    if args.len() < 4 {
+        bail!("usage: teasi osm <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]");
+    }
+    teasi::geos::available()?;
+    let (src, area, orig, dst) = (&args[0], &args[1], &args[2], &args[3]);
+    let date = match args.get(4) {
+        Some(d) => d.clone(),
+        None => chart::today(),
+    };
+    let t0 = std::time::Instant::now();
+    println!("  libgeos {}", teasi::geos::version()?);
+    let hts = match heights {
+        Some(p) => {
+            let h = teasi::heights::Heights::load(p)?;
+            println!("  {} from {}", h.describe(), p);
+            Some(h)
+        }
+        None => None,
+    };
+    let mut w = teasi::way::extract(src, &|s| println!("  {}", s))?;
+    let original = if orig == "-" { None } else { Some(Chart::open(orig)?) };
+    let rings = teasi::poly::load(area)?;
+    let p = teasi::osmarea::boundary_at(&rings, 1.0)?;
+    let d = teasi::osm::build(
+        &mut w,
+        &p,
+        original.as_ref(),
+        date.as_bytes(),
+        hts.as_ref(),
+        country,
+        name,
+        &chart::device(),
+        &|s| println!("  {}", s),
+    )?;
+    std::fs::write(dst, &d)?;
+    println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
+    Ok(true)
+}
+
 fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<bool> {
     if args.len() < 4 {
         bail!("usage: teasi osmarea <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]");
@@ -642,6 +731,20 @@ fn run() -> Result<bool> {
             }
             land(&args[1], &args[2])?;
             Ok(true)
+        }
+        "ways" => {
+            if args.len() != 3 {
+                bail!("usage: teasi ways <file.osm.pbf> <out>");
+            }
+            ways(&args[1], &args[2])?;
+            Ok(true)
+        }
+        "osm" => {
+            let country = match opt("country") {
+                Some(v) => v.parse().context("--country")?,
+                None => 4,
+            };
+            compile_osm(&args[1..], country, opt("name").unwrap_or("Denmark"), opt("heights"))
         }
         "osmarea" => {
             let country = match opt("country") {
