@@ -1,7 +1,7 @@
 //! The outer shell of a chart file: header, checksum, tile directory, records.
 //! The format is documented in docs/CHART_FILES.md sections 1 to 4.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use md5::{Digest, Md5};
 
 use crate::lzma;
@@ -144,9 +144,18 @@ impl Signer {
         global_key(&self.device)
     }
 
-    /// The header MAC of a finished file.
-    pub fn mac(&self, d: &[u8]) -> [u8; 16] {
-        header_md5(d, if self.bind { &self.device } else { b"" })
+    /// The header MAC of a finished file.  Both the MAC and the firmware's own
+    /// check read 1 KB from 0x44 and the last KB, so anything shorter than that
+    /// cannot be a chart file -- which is what a layer with no records at all
+    /// comes out as.
+    pub fn mac(&self, d: &[u8]) -> Result<[u8; 16]> {
+        ensure!(
+            d.len() >= 0x844,
+            "{} bytes is too short for a chart file: the checksum covers 1 KB from 0x44 \
+             and the last KB, so there is nothing to sign",
+            d.len()
+        );
+        Ok(header_md5(d, if self.bind { &self.device } else { b"" }))
     }
 }
 

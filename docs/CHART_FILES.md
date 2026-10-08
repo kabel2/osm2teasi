@@ -497,6 +497,12 @@ terrain 18), and it prints every file's `packages.xml` size and MD5 at the end. 
 takes a name from `COUNTRIES` (section 1) or a bare code, and the country decides both the
 header's code and the file names. `--original=<chart>` is passed on to osm and osmarea.
 
+A layer with nothing in the area is **left out**: a file without a single record is a bare
+120-byte header, and both the MAC and the firmware's check read 1 KB from 0x44 plus the last
+KB, so there is nothing there to sign. Andorra, landlocked, has no `osmpoint` file for that
+reason — the firmware reads whatever `*.v*` it finds, so a missing layer costs nothing but
+that layer.
+
 The procedure per layer: run the compiler on `denmark-220101` and compare object by object
 with the original file (calibrating the rules), then switch to `denmark-latest`. The file
 names stay as they were, so that `packages.xml` only needs new sizes and MD5s (5.4); the date

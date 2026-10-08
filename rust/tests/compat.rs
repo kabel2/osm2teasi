@@ -1061,3 +1061,14 @@ fn dem_tiff_matches_tifffile() {
         assert_eq!(v, (r.next() * 2000.0 - 500.0) as f32, "value {}", i);
     }
 }
+
+/// A layer with nothing in the area comes out as a 120-byte header, and the
+/// checksum covers 1 KB from 0x44 plus the last KB -- so signing it has to be
+/// an error, not an index panic.  Andorra has no seamarks.
+#[test]
+fn signing_a_file_without_records_fails() {
+    let s = chart::Signer::bound();
+    assert!(s.mac(&[0u8; 120]).is_err());
+    assert!(s.mac(&[0u8; 0x843]).is_err());
+    assert!(s.mac(&[0u8; 0x844]).is_ok());
+}

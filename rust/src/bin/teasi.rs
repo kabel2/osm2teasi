@@ -269,7 +269,7 @@ fn roundtrip(path: &str, out: Option<&str>) -> Result<bool> {
     };
     fail(new[..4] == c.data[..4], "magic");
     fail(new[0x44..0x58] == c.data[0x44..0x58], "date, type, layer, country");
-    fail(sign.mac(&new) == new[0x34..0x44], "MAC");
+    fail(sign.mac(&new)? == new[0x34..0x44], "MAC");
     let old_dir: Vec<(u16, u16)> = c.tiles().iter().map(|t| (t.x, t.y)).collect();
     let nc = Chart { data: new.clone(), key: c.key.clone() };
     let new_dir: Vec<(u16, u16)> = nc.tiles().iter().map(|t| (t.x, t.y)).collect();
@@ -484,10 +484,20 @@ fn compile_poi(layer: &str, args: &[String], country: u32, sign: &chart::Signer)
     let rings = teasi::poly::load(area)?;
     let (what, kept, d) = if layer == "osmpoint" {
         let pts = teasi::osmpoint::collect(&cands, Some(&rings));
+        // a landlocked country has none of these, and a file without a single
+        // record is not a chart file -- leave it out instead
+        if pts.is_empty() {
+            println!("{} candidates, no seamarks in this area, no file written", n);
+            return Ok(true);
+        }
         let d = teasi::osmpoint::build(&pts, date.as_bytes(), country, sign)?;
         ("seamarks", pts.len(), d)
     } else {
         let pois = teasi::osmpoi::collect(&cands, Some(&rings));
+        if pois.is_empty() {
+            println!("{} candidates, no POIs in this area, no file written", n);
+            return Ok(true);
+        }
         let d = teasi::osmpoi::build(&pois, date.as_bytes(), country, sign)?;
         ("POIs", pois.len(), d)
     };
@@ -929,15 +939,18 @@ fn compile_all(
 
     println!("\n{} in {:.0} s:", name, t0.elapsed().as_secs_f32());
     for layer in &want {
-        let d = std::fs::read(out(layer))?;
-        println!(
-            "  {}_{}.v{}  size {} md5 {:x}",
-            prefix,
-            layer,
-            date,
-            d.len(),
-            chart::package_md5(&d)
-        );
+        let p = out(layer);
+        match std::fs::read(&p) {
+            Ok(d) => println!(
+                "  {}_{}.v{}  size {} md5 {:x}",
+                prefix,
+                layer,
+                date,
+                d.len(),
+                chart::package_md5(&d)
+            ),
+            Err(_) => println!("  {}_{}  nothing in this area, no file", prefix, layer),
+        }
     }
     println!(
         "\nCopy these into BikeNav/Map/Countries/ on the device.  They have no entry in\n\

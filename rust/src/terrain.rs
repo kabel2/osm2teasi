@@ -600,7 +600,7 @@ pub fn build(
     for (_, _, blob) in &out {
         d.extend_from_slice(blob);
     }
-    let mac = sign.mac(&d);
+    let mac = sign.mac(&d)?;
     d[0x34..0x44].copy_from_slice(&mac);
     Ok(d)
 }

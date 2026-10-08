@@ -171,7 +171,7 @@ pub fn write_chart(
     for b in blobs {
         d.extend_from_slice(b);
     }
-    let mac = sign.mac(&d);
+    let mac = sign.mac(&d)?;
     d[0x34..0x44].copy_from_slice(&mac);
     Ok(d)
 }
