@@ -114,10 +114,15 @@ def valid(p):
 
 def load(areas, coast, P):
     """-> {(array, class): [Polygon]} inside the bounding box of P.  Islets (closed
-    coastline ways with place=islet) are drawn as class 11 like piers."""
+    coastline ways with place=islet) are drawn as class 11 like piers.
+
+    The areas are taken in the order of their osmium id, not in the order the
+    extractor wrote them (which is the order libosmium flushes its buffers in):
+    that order decides which polygon enters a union first and so ends up in the
+    output, and the Rust port can only reproduce a defined one."""
     bx0, by0, bx1, by1 = P.bounds
     groups = collections.defaultdict(list)
-    for aid, t, polys in areas:
+    for aid, t, polys in sorted(areas, key=lambda a: a[0]):
         key = area_class(t)
         if key is None:
             continue

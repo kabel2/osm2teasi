@@ -3,12 +3,12 @@
 Portierung der Werkzeugkette nach Rust. Fertig sind **die Hülle** (Stufe 1:
 Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex),
 **das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion) und
-**die ersten zwei Layer-Compiler** (Stufe 3: `osmpoi` und `osmpoint`, aus dem PBF
+**drei Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint` und `osmarea`, aus dem PBF
 direkt in die Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben die
 Referenz; was hier steht, muss dasselbe liefern.
 
-Noch nicht portiert: die vier übrigen Layer-Compiler (`compile_osm.py`,
-`compile_osmarea.py`, `compile_ta.py`, `compile_terrain.py`).
+Noch nicht portiert: die drei übrigen Layer-Compiler (`compile_osm.py`,
+`compile_ta.py`, `compile_terrain.py`).
 
 ## Stand
 
@@ -25,14 +25,19 @@ Noch nicht portiert: die vier übrigen Layer-Compiler (`compile_osm.py`,
 | POIs lesen | `osm_poi_extract.py` | `poi.rs` |
 | Layer `osmpoi` bauen | `compile_osmpoi.py` | `osmpoi.rs` |
 | Layer `osmpoint` bauen | `compile_osmpoint.py` | `osmpoint.rs` |
-| Straßen, Flächen, Höhen lesen | `osm_extract.py` u. a. | – |
-| Die vier übrigen Layer bauen | `compile_*.py` | – |
+| Flächen und Küstenlinie lesen | `osm_area_extract.py` | `area.rs` |
+| Weltweite Landpolygone (Shapefile) | `land_extract.py` | `land.rs` |
+| Geometrie (GEOS) | shapely | `geos.rs` |
+| Layer `osmarea` bauen | `compile_osmarea.py` | `osmarea.rs` |
+| Straßen und Höhen lesen | `osm_extract.py` u. a. | – |
+| Die drei übrigen Layer bauen | `compile_*.py` | – |
 
 ## Bauen und prüfen
 
 ```bash
 cargo build --release
 cargo test                 # Vergleichswerte aus den Python-Werkzeugen
+TEASI_GEOS=… cargo test    # dazu die zwei GEOS-Tests (sonst übersprungen, s. u.)
 ```
 
 Der eigentliche Abnahmetest läuft gegen echte Karten (die nicht im Repo liegen):
@@ -58,6 +63,9 @@ osmpoint 110) in 1,3 s.
 | `teasi poi <datei.osm.pbf> <aus>` | POI-Kandidaten als kanonischer Dump |
 | `teasi osmpoi <pbf> <poly> <karte> [datum]` | den osmpoi-Layer bauen (`--country=N`) |
 | `teasi osmpoint <pbf> <poly> <karte> [datum]` | den osmpoint-Layer bauen (`--country=N`) |
+| `teasi area <datei.osm.pbf> <aus>` | Flächen und Küstenlinie als kanonischer Dump |
+| `teasi land <land_polygons.shp> <poly>` | Zahl und Fläche der weltweiten Landpolygone |
+| `teasi osmarea <pbf> <poly> <original\|-> <karte> [datum]` | den osmarea-Layer bauen (`--country=N`, `--land=…`) |
 
 Die Seriennummer kommt wie bei den Python-Werkzeugen aus `TEASI_DEVICE`
 (Standard: die in `chart.rs`).
@@ -110,49 +118,61 @@ python scripts/addr_compare.py py.txt rs.txt
 `addr_dump.py` schreibt die Einträge kanonisch, Koordinaten als IEEE-Bitmuster;
 `addr_compare.py` paart sie über die Tag-Felder und misst die Abweichung in Metern.
 
-**Dänemark** (`denmark-latest`): dieselben 2.628.399 Einträge, keiner fehlt, keiner
-kommt dazu; die 2.614.459 Adressen und 12.511 Orte an Knoten sind **bitgleich**.
+**Dänemark** (`denmark-latest`): alle 2.628.399 Einträge **bitgleich** — 2.614.623
+Adressen und 13.776 Orte.
 
-**Großbritannien**: 5.022.875 der 5.023.357 Adressen bitgleich, 111.333 der 111.338
-Orte, alle 140.467 Interpolationspunkte. Von den Adressen weichen 480 um Median 0,78 m
-ab (höchstens 40 m), von den Orten 5; 3 Adressen und 2 Orte fehlen, 2 Adressen kommen
-dazu. Alles davon sind Flächen mit kaputten Ringen (siehe unten).
+**Großbritannien**: 5.023.341 der 5.023.358 Adressen bitgleich, 111.338 der
+111.340 Orte, alle 140.467 Interpolationspunkte. 17 Adressen weichen um Median 0,93 m
+ab (höchstens 5,6 m), 2 Orte um 27 m, 2 Adressen kommen dazu — alles Flächen, deren
+Ringe sich selbst berühren (siehe unten).
 
 | | Python | Rust |
 |---|---:|---:|
 | Dänemark (494 MB PBF) | 270 s, 2,2 GB | 4,7 s, 1,5 GB |
-| Großbritannien (2,2 GB PBF) | ~20 min | 30 s, 4,7 GB |
+| Großbritannien (2,2 GB PBF) | ~20 min | 31 s, 5,3 GB |
 
 Die drei Durchgänge brauchen für Großbritannien 6, 8 und 11 s; ein Durchgang über die
 2,2 GB kostet allein rund 6 s, der Rest ist die eigentliche Arbeit.
 
 ### Flächen so zusammenbauen wie libosmium
 
-Eine Adresse oder ein POI an einem Polygon bekommt als Position den Mittelwert der
-Eckpunkte. Die Python-Werkzeuge holen diese Punkte von libosmium, und das hat zwei
-Konventionen, die man beide nachbauen muss, sonst liegt der Mittelpunkt Meter daneben
-(`osm.rs`, Abschnitt „areas the way libosmium assembles them"):
+Alles, was an einer Fläche hängt — der Mittelpunkt einer Adresse, die Position eines
+POIs, die Ringe des osmarea-Layers — kommt in Python von libosmium. Dessen
+Flächenbau ist in `osm.rs` nachgebaut (`assemble_segments`, `split_rings`,
+`area_loc_rings`), und zwar so:
 
-- **Ein Ring beginnt an seinem geometrisch kleinsten Eckpunkt** und wiederholt ihn am
-  Ende. libosmium normiert jede Kante so, dass der kleinere Endpunkt vorne steht,
-  sortiert die Kanten und fängt den Ring bei der ersten an. Der Mittelwert zählt
-  dadurch einen Punkt doppelt — und bei der Reihenfolge des Wegs wäre es ein anderer.
-- **Außen und innen entscheidet die Verschachtelung, nicht die Member-Rolle.** Ein Ring
-  in einer geraden Zahl anderer Ringe ist außen. Die Rollen in OSM sind oft falsch —
-  in Großbritannien gibt es Multipolygone, deren Außenringe als `inner` oder gar als
-  `building` eingetragen sind.
+- **Aus Kanten, nicht aus Wegen.** Jede Kante (Knotenpaar) wird so normiert, dass der
+  kleinere Ort vorne steht, dann werden alle Kanten sortiert — und **gleiche Kanten
+  löschen sich paarweise aus**. Das ist der Kern: zwei Wege, die ein Stück
+  aneinander entlanglaufen, verschmelzen dadurch zu *einem* Ring, und ein Zacken, der
+  in sich zurückläuft, verschwindet. Danach werden die Ringe aus dem Rest gelaufen.
+- **Orte, nicht Knoten-Ids.** libosmium vergleicht Positionen. Zwei verschiedene
+  Knoten an derselben Stelle sind für den Zusammenbau derselbe Punkt.
+- **Ein Ring, der sich selbst berührt, zerfällt** an dieser Stelle in zwei Ringe
+  (`split_rings`) — in der Regel in einen Außenring und ein Loch.
+- **Ein Ring beginnt an seinem kleinsten Eckpunkt** und wiederholt ihn am Ende; der
+  Vergleich läuft über die Dezimikrograd-Ganzzahlen, nicht über die Teasi-Einheiten
+  (dort ist y gespiegelt). Der Mittelwert zählt diesen Punkt dadurch doppelt.
+- **Außen und innen entscheidet die Verschachtelung, nicht die Member-Rolle.** Ein
+  Ring in einer geraden Zahl anderer Ringe ist außen. Die Rollen in OSM sind oft
+  falsch — in Großbritannien gibt es Multipolygone, deren Außenringe als `inner` oder
+  gar als `building` eingetragen sind. Berühren sich zwei Ringe in einem Eckpunkt, ist
+  der erste Punkt als Testpunkt untauglich (er liegt auf dem anderen Ring); genommen
+  wird der erste Punkt, der keine Ecke des anderen Ringes ist.
+- **`area=no` verbietet die Fläche**, wie die Tags sonst auch aussehen.
+- Die **Richtung** (Außenringe gegen den Uhrzeigersinn in lon/lat) wird an den
+  Dezimikrograd-Koordinaten entschieden, nicht an den gerundeten: eine winzige Fläche
+  fällt beim Runden zusammen, und dann entscheidet das Runden die Richtung.
 
-Damit sind die Flächenadressen bitgleich: vor dieser Nachbildung wichen 4,3 von
-5,0 Mio. britischen Adressen um Median 1,6 m ab, jetzt sind es 480.
+Was das bringt, in Zahlen: die britischen Adressen gingen von 712.719 über 5.022.875
+auf **alle 5.023.357** bitgleich, die dänischen osmpoi-Records von 3693 auf **alle
+3699**. Von 978.957 dänischen OSM-Flächen baut der Extraktor 978.902 bitgleich.
 
-**Was übrig bleibt**, sind Flächen, deren Ringe nicht sauber schließen. Der
-Zusammenbau hier ist einfach — Wege an gemeinsamen Enden aneinanderhängen —, während
-libosmium eine Kantenmenge sortiert, doppelte Kanten entfernt und an Berührpunkten
-aufteilt. Zwei geschlossene Wege, die sich in zwei Knoten berühren, werden dort zu
-*einem* Ring verschmolzen, hier bleiben es zwei; in Großbritannien betrifft das 156
-von 2142 POI-Relationen (Median 1,3 m, im Extremfall 242 m). In vier Fällen baut
-libosmium eine Fläche ganz ohne Außenring und liefert deshalb keinen POI, hier
-entsteht einer; in einem Fall ist es umgekehrt.
+**Was übrig bleibt**, sind Flächen, deren Ringe sich selbst berühren — 55 von 978.957
+in Dänemark, 347 von 4.868.591 in Großbritannien (0,007 %): libosmium läuft an solchen Kreuzungen nicht nach „erste freie Kante", sondern
+sucht, teilt und fügt die Ringe hinterher wieder zusammen. Dann unterscheiden sich die
+Zahl der Ringe oder der Startpunkt eines Rings. Diesen Teil des Assemblers (in
+libosmium rund 1000 Zeilen) nachzubauen lohnt für ein Promille eines Promilles nicht.
 
 Eine zweite Stelle war feiner: CPythons `sum()` summiert Gleitkommazahlen seit 3.12
 **kompensiert** (Neumaier). Ein naives `for`-Summieren in Rust lag deshalb ein Bit
@@ -188,14 +208,13 @@ gleich sein.
 
 | | Kandidaten bitgleich | Records bitgleich |
 |---|---|---|
-| osmpoi Dänemark | 88.978 Knoten, 18.596 Wege, 323 von 330 Relationen | 3693 von 3699 |
-| osmpoi Großbritannien | 601.625 Knoten, 217.134 Wege, 1982 von 2142 Relationen | 15.498 von 15.619 |
+| osmpoi Dänemark | 88.978 Knoten, 18.596 Wege, **330 von 330** Relationen | **3699 von 3699** |
+| osmpoi Großbritannien | 601.625 Knoten, 217.134 Wege, 2125 von 2139 Relationen | 15.603 von 15.619 |
 | osmpoint Dänemark | | **128 von 128** |
-| osmpoint Großbritannien | | 353 von 354 |
+| osmpoint Großbritannien | | **354 von 354** |
 
-Alle Abweichungen sind die Flächen-Ringe von oben: Knoten und Wege stimmen zu 100 %,
-nur bei Multipolygonen liegt der Mittelpunkt um Meter daneben. Beim britischen
-osmpoint ist es genau eine Marina, bei der das 8 m ausmacht.
+Was abweicht, sind die Flächen-Ringe von oben: Knoten und Wege stimmen zu 100 %, nur
+bei einzelnen Multipolygonen liegt der Mittelpunkt um Meter daneben.
 
 | | Python (nur die Extraktion) | Rust (PBF → Kartendatei) |
 |---|---:|---:|
@@ -211,6 +230,91 @@ Schlüssel sind offen (`seamark:light:3:colour`).
 Zwei Kleinigkeiten, die beim Nachbauen auffielen: Pythons `round()` rundet die Hälfte
 zur geraden Seite (`f64::round_ties_even`), und `str.capitalize()` macht den Rest des
 Worts klein — aus `DGPS` wird `Dgps`.
+
+## Stufe 3: der Layer osmarea
+
+Der erste Compiler, der eine fremde Bibliothek braucht: `compile_osmarea.py`
+verschmilzt alle Flächen einer Klasse, vereinfacht sie, schneidet sie auf die
+Landesgrenze und in Blöcke und baut das Meer aus der Küstenlinie — alles mit shapely,
+also mit **GEOS**. Dieselben Bytes gibt es nur mit derselben Bibliothek, darum spricht
+`geos.rs` libgeos direkt an.
+
+```bash
+./target/release/teasi osmarea osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    <original>/Denmark_osmarea.v20210810 build/Denmark_osmarea.v20210810 20210810
+# Land ohne Originaldatei: Meer aus den weltweiten Landpolygonen
+./target/release/teasi osmarea osm_ref/great-britain-latest.osm.pbf \
+    osm_ref/great-britain.poly - build/GreatBritain_osmarea.v20260918 20260918 \
+    --country=17 --land=osm_ref/land-polygons-split-4326/land_polygons.shp
+```
+
+`area.rs` ist `osm_area_extract.py` (Flächen und Küstenlinie, Koordinaten direkt in
+osmarea-Einheiten, 360/2^25 Grad), `land.rs` ist `land_extract.py` samt einem kleinen
+Shapefile-Leser — eine Polygon-Shapefile ist eine flache Folge von Records, dafür
+braucht es keine Crate. `osmarea.rs` ist der Compiler selbst.
+
+### libgeos zur Laufzeit
+
+`geos.rs` lädt `libgeos_c` per `dlopen`, bindet nur die rund 40 benutzten Funktionen
+und hält pro Thread einen GEOS-Kontext. Der Vorteil: `cargo build` braucht weder GEOS
+noch dessen Header, nur `teasi osmarea` braucht die Bibliothek — und man kann genau die
+nehmen, die shapely benutzt. Gesucht wird `$TEASI_GEOS`, dann `libgeos_c.so.1`, dann
+`libgeos_c.so`:
+
+```bash
+G=.venv/lib/python3*/site-packages/shapely.libs
+TEASI_GEOS=$PWD/$G/libgeos_c-*.so.* LD_LIBRARY_PATH=$PWD/$G ./target/release/teasi osmarea …
+```
+
+(`LD_LIBRARY_PATH` muss dazu, weil shapelys `libgeos_c` seine `libgeos` daneben
+liegend sucht, ohne RPATH.) Für **bitgleiche** Ergebnisse muss es dieselbe
+GEOS-Version sein wie die von shapely — hier 3.13.1. Die Wrapper halten sich an
+shapelys Semantik: `parts` ist `shapely.get_parts` (ein Polygon ist sein eigener
+einziger Teil), `Geom::rect` baut den Ring genau wie `shapely.box`, offene Ringe werden
+wie dort geschlossen, und der STRtree hat shapelys Knotenkapazität 10 — sonst käme eine
+Abfrage in anderer Reihenfolge zurück, und die entscheidet, welches Polygon als erstes
+in eine Vereinigung geht.
+
+### Eine Änderung in Python
+
+`compile_osmarea.py` nahm die Flächen in der Reihenfolge, in der der Extraktor sie
+geschrieben hat — und das ist die Reihenfolge, in der libosmium seine Puffer leert.
+Diese Reihenfolge entscheidet, welches Polygon als erstes in eine Vereinigung geht und
+damit, was in der Datei landet. Sie ist nicht nachbaubar, also sortiert jetzt **auch
+Python** nach der osmium-Id (`load()` in `compile_osmarea.py`). Die Ausgabe wird dadurch
+reproduzierbar; die Karte ist dieselbe wie vorher, nur in definierter Reihenfolge
+zusammengesetzt.
+
+### Geprüft gegen Python
+
+Zweistufig wie bei den POIs — erst der Extraktor gegen das Pickle, dann die Records:
+
+```bash
+./target/release/teasi area osm_ref/denmark-latest.osm.pbf rs.txt
+python scripts/area_dump.py build/ref/area_latest.pkl py.txt
+python scripts/area_compare.py py.txt rs.txt          # paart über die osmium-Id
+python scripts/osmarea_compare.py py.v20210810 rs.v20210810   # Objekt für Objekt
+```
+
+| | Dänemark | Großbritannien |
+|---|---|---|
+| Flächen bitgleich | 978.902 von 978.957 | 4.868.244 von 4.868.591 |
+| Küstenlinien-Wege bitgleich | 2230 von 2230 | 28.184 von 28.184 |
+| Polygone je Klasse | 700.620 in 16 Klassen, 6 davon abweichend | 2.520.840 in 16 Klassen, 52 davon abweichend |
+| Records bitgleich | 308 von 340 | 1029 von 1157 |
+| Laufzeit (PBF → Kartendatei) | 61 s | 190 s, 7,1 GB |
+| Python (ab Pickle) | 150 s + 1 min Extraktion | 456 s + 10 min Extraktion |
+
+Die abweichenden Records hängen an den abweichenden Flächen von oben (55 in Dänemark,
+347 in Großbritannien): eine einzige
+abweichende Fläche verändert die Vereinigung ihrer Klasse und damit jeden Block, in dem
+sie liegt — und ein Record enthält alle Klassen einer Zelle. Objektweise verglichen
+(`osmarea_compare.py`) sind es einzelne Ringe mit einem Punkt mehr oder weniger.
+
+Das Meer ist dabei der aufwendigste Teil und stimmt vollständig: die Küstenlinie wird
+zu Ketten zusammengesetzt (Land links, offene Ketten gerade geschlossen), außerhalb der
+Grenze kommt `#OW` aus der Originaldatei, und deren Ringe werden mit der
+Even-Odd-Regel paarweise in einem Baum verrechnet.
 
 ## Zwei Fallen
 

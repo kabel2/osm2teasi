@@ -166,6 +166,17 @@ Details und Laufzeiten: [KARTEN_ENTSCHLUESSELUNG.md](KARTEN_ENTSCHLUESSELUNG.md)
     build/gb/area.pkl osm_ref/great-britain.poly - build/gb/GreatBritain_osmarea.v20260918 20260918
 ```
 
+Dasselbe in Rust, ohne Pickle dazwischen (braucht libgeos, siehe
+[../rust/README.md](../rust/README.md)):
+
+```bash
+cd rust && ./target/release/teasi osmarea osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    <original>/Denmark_osmarea.v20210810 build/Denmark_osmarea.v20210810 20210810   # 61 s
+./target/release/teasi osmarea osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly \
+    - build/GreatBritain_osmarea.v20260918 20260918 --country=17 \
+    --land=osm_ref/land-polygons-split-4326/land_polygons.shp
+```
+
 `osm_area_extract.py` speichert alle Flächen (geschlossene Ways und Multipolygone, per osmium
 zusammengesetzt) mit Landnutzungs-Tags sowie die Küstenlinien-Ways. `compile_osmarea.py` baut
 daraus den Layer (Abgleich des Originals mit `denmark-220101`, Regeln unten):
@@ -187,16 +198,20 @@ daraus den Layer (Abgleich des Originals mit `denmark-220101`, Regeln unten):
    | c6 | `natural=water` (außer `water=river`), `landuse=basin, reservoir, aquaculture`, `waterway=dock` |
 
 2. OSM-Flächen unter **150 Einheiten²** (~120 m²) fallen weg (Übernahmequote springt dort).
-3. Alle Flächen einer Klasse werden **verschmolzen**: Nachbarparzellen mit gemeinsamer Kante
+3. Die Flächen werden nach ihrer osmium-Id sortiert verarbeitet. Die Reihenfolge
+   entscheidet, welches Polygon als erstes in eine Vereinigung eingeht, und die
+   Schreibreihenfolge des Extraktors (die Puffer-Reihenfolge von libosmium) ist nicht
+   nachbaubar — sortiert ist das Ergebnis reproduzierbar.
+4. Alle Flächen einer Klasse werden **verschmolzen**: Nachbarparzellen mit gemeinsamer Kante
    sind im Original ein Ring (daher teilen nur ~70 % der Äcker ihre Knoten mit dem Original).
-4. `hi` je verschmolzener Fläche (s. o.), dann **Douglas-Peucker mit 4 Einheiten** (weggelassene
+5. `hi` je verschmolzener Fläche (s. o.), dann **Douglas-Peucker mit 4 Einheiten** (weggelassene
    OSM-Knoten liegen im Original höchstens 4 Einheiten neben dem Ring), Zuschnitt auf die
    Geofabrik-Grenze und die 4096er-Blöcke.
-5. **Meer:** Das Original nutzt eine weltweite Küstenlinie (Schweden, Norwegen, Deutschland
+6. **Meer:** Das Original nutzt eine weltweite Küstenlinie (Schweden, Norwegen, Deutschland
    inklusive). Innerhalb der Grenze baut der Compiler das Meer neu aus `natural=coastline`
    (Ketten zusammensetzen, Land links; offene Ketten enden weit außerhalb und werden gerade
    geschlossen), außerhalb übernimmt er `#OW` aus der Originaldatei.
-6. Tiles ohne Zelle innerhalb der Grenze (die **Färöer**) werden unverändert aus dem Original
+7. Tiles ohne Zelle innerhalb der Grenze (die **Färöer**) werden unverändert aus dem Original
    kopiert. Wie im Original stehen alle 16 Zellen jedes Tiles in der Datei (leere entfallen).
 
 Ergebnis gegen das Original (beide aus `denmark-220101` gebaut, Flächensumme je Klasse):
@@ -211,4 +226,6 @@ außerdem Gewässer jenseits der Grenze enthalten). Aus `denmark-latest` (2026-0
 2. Genaue Zeichenreihenfolge c3/c5/c6 und die Reihenfolge der c5-Objekte (Compiler: grob wie
    im Original, `CLASS_ORDER`).
 3. Warum ~8 % der Bounding-Boxen größer als die Punkte sind.
-4. Der Compiler braucht ~20 min (Verschmelzen der großen Klassen, Einlesen des Original-Meers).
+4. Laufzeit: Python braucht für Dänemark 1 min Extraktion und 2,5 min Compiler (das
+   Verschmelzen der großen Klassen und das Einlesen des Original-Meers), die
+   Rust-Portierung 1 min vom PBF bis zur Datei.

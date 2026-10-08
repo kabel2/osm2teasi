@@ -264,40 +264,56 @@ pub fn mean(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
 //   * Outer and inner rings are told apart by how deeply they are nested, not by
 //     the member roles -- those are merely a hint and are routinely wrong.
 
-/// Join ways into closed rings of node ids, each without the repeated end.
+/// Rings of locations from the segments of several ways, the way libosmium
+/// assembles an area: every segment is normalised so that the smaller location
+/// comes first, pairs of identical segments cancel each other out -- that is how
+/// two ways running along each other merge their rings, and how a spike that
+/// doubles back disappears -- and the rings are then walked out of what is left.
 /// None when a ring stays open: libosmium then builds no area at all.
-pub fn assemble_rings(ways: &[Vec<i64>]) -> Option<Vec<Vec<i64>>> {
-    let mut used = vec![false; ways.len()];
-    let mut out: Vec<Vec<i64>> = Vec::new();
-    for start in 0..ways.len() {
-        if used[start] || ways[start].len() < 2 {
+pub fn assemble_segments(ways: &[Vec<(i32, i32)>]) -> Option<Vec<Vec<(i32, i32)>>> {
+    let mut segs: Vec<((i32, i32), (i32, i32))> = Vec::new();
+    for w in ways {
+        for p in w.windows(2) {
+            if p[0] != p[1] {
+                segs.push(if p[0] < p[1] { (p[0], p[1]) } else { (p[1], p[0]) });
+            }
+        }
+    }
+    segs.sort_unstable();
+    let mut kept: Vec<((i32, i32), (i32, i32))> = Vec::new();
+    let mut i = 0;
+    while i < segs.len() {
+        let mut j = i;
+        while j < segs.len() && segs[j] == segs[i] {
+            j += 1;
+        }
+        if (j - i) % 2 == 1 {
+            kept.push(segs[i]);
+        }
+        i = j;
+    }
+    let mut adj: std::collections::HashMap<(i32, i32), Vec<usize>> =
+        std::collections::HashMap::new();
+    for (k, s) in kept.iter().enumerate() {
+        adj.entry(s.0).or_default().push(k);
+        adj.entry(s.1).or_default().push(k);
+    }
+    let mut used = vec![false; kept.len()];
+    let mut out: Vec<Vec<(i32, i32)>> = Vec::new();
+    for start in 0..kept.len() {
+        if used[start] {
             continue;
         }
         used[start] = true;
-        let mut ring = ways[start].clone();
-        while ring[0] != *ring.last().unwrap() {
-            let end = *ring.last().unwrap();
-            let mut found = false;
-            for (i, w) in ways.iter().enumerate() {
-                if used[i] || w.len() < 2 {
-                    continue;
-                }
-                if w[0] == end {
-                    ring.extend_from_slice(&w[1..]);
-                } else if *w.last().unwrap() == end {
-                    ring.extend(w[..w.len() - 1].iter().rev());
-                } else {
-                    continue;
-                }
-                used[i] = true;
-                found = true;
-                break;
-            }
-            if !found {
-                return None;
-            }
+        let first = kept[start].0;
+        let mut ring = vec![first];
+        let mut end = kept[start].1;
+        while end != first {
+            ring.push(end);
+            let next = adj.get(&end)?.iter().copied().find(|&k| !used[k])?;
+            used[next] = true;
+            end = if kept[next].0 == end { kept[next].1 } else { kept[next].0 };
         }
-        ring.pop();
         out.push(ring);
     }
     if out.is_empty() {
@@ -307,31 +323,92 @@ pub fn assemble_rings(ways: &[Vec<i64>]) -> Option<Vec<Vec<i64>>> {
     }
 }
 
-/// The points of one ring, rotated to start at its smallest vertex and closed
-/// by repeating that vertex -- see the note above.  The comparison is made on
-/// the decimicrodegrees, because that is what libosmium compares.
-pub fn ring_points(ring: &[i64], index: &NodeIndex) -> Option<Vec<(f64, f64)>> {
-    let dm: Vec<(i32, i32)> = ring.iter().map(|id| index.get_dm(*id)).collect::<Option<_>>()?;
-    let at = (0..dm.len()).min_by_key(|&i| dm[i])?;
-    let mut pts: Vec<(f64, f64)> =
-        dm[at..].iter().chain(dm[..at].iter()).map(|&(lon, lat)| xy_dm(lon, lat)).collect();
-    pts.push(pts[0]);
-    Some(pts)
+/// Split a closed sequence of node locations wherever it visits a location
+/// twice, the way libosmium's assembler does: a ring touching itself falls
+/// apart into two rings (an outer one and a hole, as the nesting then shows).
+/// Pieces with fewer than three points are no rings and are dropped.
+pub fn split_rings(locs: &[(i32, i32)]) -> Vec<Vec<(i32, i32)>> {
+    let mut out: Vec<Vec<(i32, i32)>> = Vec::new();
+    let mut stack: Vec<(i32, i32)> = Vec::new();
+    let mut at: std::collections::HashMap<(i32, i32), usize> = std::collections::HashMap::new();
+    for &p in locs {
+        match at.get(&p) {
+            Some(&i) => {
+                // the piece back to the earlier visit closes a ring of its own;
+                // the shared location stays for the rest of the ring
+                let piece = stack.split_off(i + 1);
+                for q in &piece {
+                    at.remove(q);
+                }
+                let mut ring = vec![p];
+                ring.extend(piece);
+                if ring.len() > 2 {
+                    out.push(ring);
+                }
+            }
+            None => {
+                at.insert(p, stack.len());
+                stack.push(p);
+            }
+        }
+    }
+    if stack.len() > 2 {
+        out.push(stack);
+    }
+    out
+}
+
+/// Every ring of an area, assembled, split and rotated so that it starts at its
+/// smallest location -- the comparison is on the decimicrodegree integers, as in
+/// libosmium.  `ways` are the member ways' node ids; for a closed way that is
+/// just the way itself.  None when a ring stays open or a node is missing.
+pub fn area_loc_rings(ways: &[Vec<i64>], index: &NodeIndex) -> Option<Vec<Vec<(i32, i32)>>> {
+    let locs: Vec<Vec<(i32, i32)>> = ways
+        .iter()
+        .map(|w| w.iter().map(|id| index.get_dm(*id)).collect::<Option<Vec<_>>>())
+        .collect::<Option<_>>()?;
+    let rings = assemble_segments(&locs)?;
+    rings
+        .iter()
+        .flat_map(|r| split_rings(r))
+        .map(|r| {
+            let at = (0..r.len()).min_by_key(|&i| r[i])?;
+            Some(r[at..].iter().chain(r[..at].iter()).copied().collect())
+        })
+        .collect()
+}
+
+/// The same rings in Teasi units, each closed by repeating its first point --
+/// so the mean over them double-counts that point, exactly as in Python.
+pub fn area_rings(ways: &[Vec<i64>], index: &NodeIndex) -> Option<Vec<Vec<(f64, f64)>>> {
+    Some(
+        area_loc_rings(ways, index)?
+            .iter()
+            .map(|r| {
+                let mut pts: Vec<(f64, f64)> =
+                    r.iter().map(|&(lon, lat)| xy_dm(lon, lat)).collect();
+                pts.push(pts[0]);
+                pts
+            })
+            .collect(),
+    )
 }
 
 /// Mean over the points of the outer rings; None if none of them is outer.
 /// A ring nested in an even number of other rings is an outer one.
 pub fn area_centre(rings: &[Vec<(f64, f64)>]) -> Option<(f64, f64)> {
+    // two rings touching in a vertex make the test point ambiguous, so take the
+    // first point of the ring that is not a corner of the ring tested against
+    let is_in = |r: &[(f64, f64)], o: &[(f64, f64)]| -> bool {
+        let (x, y) = *r.iter().find(|p| !o.contains(p)).unwrap_or(&r[0]);
+        crate::poly::inside(o, x, y)
+    };
     let outer: Vec<(f64, f64)> = rings
         .iter()
         .enumerate()
         .filter(|(i, r)| {
-            let (x, y) = r[0];
-            let depth = rings
-                .iter()
-                .enumerate()
-                .filter(|(j, o)| j != i && crate::poly::inside(o, x, y))
-                .count();
+            let depth =
+                rings.iter().enumerate().filter(|(j, o)| j != i && is_in(r, o)).count();
             depth % 2 == 0
         })
         .flat_map(|(_, r)| r.iter().copied())
@@ -339,8 +416,3 @@ pub fn area_centre(rings: &[Vec<(f64, f64)>]) -> Option<(f64, f64)> {
     mean(&outer)
 }
 
-/// Every ring of an area, ready for [`area_centre`].  `ways` are the member
-/// ways' node ids -- for a closed way that is just the way itself.
-pub fn area_rings(ways: &[Vec<i64>], index: &NodeIndex) -> Option<Vec<Vec<(f64, f64)>>> {
-    assemble_rings(ways)?.iter().map(|r| ring_points(r, index)).collect()
-}

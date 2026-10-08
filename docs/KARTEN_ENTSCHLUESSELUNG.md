@@ -523,31 +523,43 @@ im Kopf muss „unbekannt" bleiben, sonst stört der End-Marker), und die Contai
 müssen auch die unverstandenen Felder durchreichen.
 
 Ebenfalls portiert ist das Lesen von OSM (`osm.rs`: PBF-Leser und Knoten-Index,
-`addr.rs`: `osm_addr_extract.py`). Für Dänemark liefert es dieselben 2.628.399
-Einträge wie Python, in 4,8 statt 270 s; für Großbritannien 5.022.875 der 5.023.357
-Adressen und 111.333 der 111.338 Orte bitgleich. Geprüft wird mit
+`addr.rs`: `osm_addr_extract.py`). Für Dänemark liefert es alle 2.628.399 Einträge
+**bitgleich**, in 4,7 statt 270 s; für Großbritannien 5.023.341 der 5.023.358 Adressen und 111.338 der 111.340 Orte bitgleich. Geprüft wird mit
 `rust/scripts/addr_dump.py` und `rust/scripts/addr_compare.py` gegen das Pickle.
 
-Dass die Flächen-Mittelpunkte überhaupt stimmen, liegt an zwei nachgebauten
-libosmium-Konventionen (`osm.rs`): ein Ring beginnt an seinem geometrisch kleinsten
-Eckpunkt und wiederholt ihn am Ende, und außen/innen entscheidet die Verschachtelung
-der Ringe, nicht die Member-Rolle. Ohne das lagen 4,3 von 5,0 Mio. britischen
-Adressen um Median 1,6 m daneben.
+Dass die Flächen überhaupt stimmen, liegt an libosmiums Flächenbau, der in `osm.rs`
+nachgebaut ist: aus **Kanten**, die normiert und sortiert werden und sich paarweise
+auslöschen, wenn sie doppelt vorkommen (so verschmelzen zwei aneinander entlanglaufende
+Wege zu einem Ring); verglichen werden Orte, nicht Knoten-Ids; ein Ring, der sich selbst
+berührt, zerfällt dort in zwei; jeder Ring beginnt an seinem kleinsten Eckpunkt und
+wiederholt ihn am Ende; außen/innen entscheidet die Verschachtelung, nicht die
+Member-Rolle; und `area=no` verbietet die Fläche. Ohne das lagen 4,3 von 5,0 Mio.
+britischen Adressen um Median 1,6 m daneben.
 
-Zwei Layer-Compiler sind portiert: `poi.rs` liest die Kandidaten für beide, `osmpoi.rs`
-und `osmpoint.rs` bauen die Dateien, alles in einem Lauf über das PBF (Großbritannien
-35 bzw. 17 s statt 24 min allein für die Extraktion). Von 15.619 osmpoi-Records der
-britischen Karte sind 15.498 bytegleich mit der Python-Version, von 354
-osmpoint-Records 353, und für Dänemark alle 128. Die Unterschiede sind Multipolygone
-mit sich berührenden Ringen, die libosmiums Zusammenbau anders aufteilt.
+Drei Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
+`osmpoint.rs`, alles in einem Lauf über das PBF (Großbritannien 35 bzw. 17 s statt
+24 min allein für die Extraktion); für Dänemark sind alle 3699 osmpoi- und alle 128
+osmpoint-Records bytegleich mit der Python-Version, für Großbritannien
+15.603 von 15.619 osmpoi-Records und alle 354 osmpoint-Records. `osmarea.rs` (mit `area.rs`, `land.rs` und `geos.rs`) baut den
+Flächenlayer: 308 von 340 dänischen Records bytegleich, 1029 von 1157 britischen. Was
+abweicht, sind Multipolygone mit sich selbst berührenden Ringen, die libosmium anders
+aufteilt.
 
 ```bash
 ./target/release/teasi osmpoi  <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osmpoint <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
+./target/release/teasi osmarea <pbf> <poly> <original|-> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi md5s <karte>   # auf beiden Dateien, dann diff
 ```
 
-Die übrigen Extraktoren und die vier anderen Layer-Compiler sind noch nicht portiert.
+`osmarea` braucht **libgeos** (shapely benutzt es auch, und bitgleich wird es nur mit
+derselben Version): `geos.rs` lädt die Bibliothek zur Laufzeit per `dlopen`, zu finden
+über `TEASI_GEOS`. Der Build selbst braucht sie nicht. Eine Änderung ging zurück nach
+Python: `compile_osmarea.py` sortiert die Flächen jetzt nach ihrer osmium-Id, denn die
+Reihenfolge des Extraktors (libosmiums Puffer-Reihenfolge) entscheidet mit, welches
+Polygon in einer Vereinigung zuerst liegt, und ist nicht nachbaubar.
+
+Die übrigen Extraktoren und die drei anderen Layer-Compiler sind noch nicht portiert.
 
 ---
 

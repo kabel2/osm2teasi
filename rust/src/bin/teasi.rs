@@ -1,5 +1,6 @@
 //! Command line front end.  See the subcommand list in `usage`.
 
+use std::io::Write;
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
@@ -26,6 +27,14 @@ usage: teasi <command> [arguments]
   osmpoint <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD] [--country=N]
                              compile that layer (country 4 = Denmark,
                              17 = United Kingdom)
+  area <file.osm.pbf> <out>  areas and coastline as a canonical dump
+  land <land_polygons.shp> <area.poly>
+                             count and area of the worldwide land polygons
+  osmarea <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]
+                             compile the area layer; the original supplies the
+                             sea outside the boundary, without one pass
+                             --land=<land_polygons.shp> (needs libgeos, see
+                             src/geos.rs)
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
 
@@ -459,6 +468,111 @@ fn compile_poi(layer: &str, args: &[String], country: u32) -> Result<bool> {
     Ok(true)
 }
 
+/// Canonical dump of the areas and the coastline, to compare with the Python
+/// pickle (rust/scripts/area_dump.py + area_compare.py).
+fn area(path: &str, dst: &str) -> Result<()> {
+    let ex = teasi::area::extract(path, &|s| println!("  {}", s))?;
+    let mut out = std::io::BufWriter::new(std::fs::File::create(dst)?);
+    let digest = |r: &[(i32, i32)]| {
+        let mut h = Md5::new();
+        for &(x, y) in r {
+            h.update(x.to_le_bytes());
+            h.update(y.to_le_bytes());
+        }
+        format!("{:x}", h.finalize())[..8].to_string()
+    };
+    let mut areas: Vec<&teasi::area::Area> = ex.areas.iter().collect();
+    areas.sort_by_key(|a| a.id);
+    for a in &areas {
+        write!(out, "a\t{}\t{}", a.id, a.polys.len())?;
+        for p in &a.polys {
+            write!(
+                out,
+                "\t{},{},{},{},{}",
+                p.outer.len(),
+                p.inners.len(),
+                p.outer[0].0,
+                p.outer[0].1,
+                digest(&p.outer)
+            )?;
+            for i in &p.inners {
+                write!(out, ",{}:{}", i.len(), digest(i))?;
+            }
+        }
+        writeln!(out)?;
+    }
+    let mut coast: Vec<&teasi::area::Coast> = ex.coast.iter().collect();
+    coast.sort_by_key(|c| c.id);
+    for c in &coast {
+        writeln!(
+            out,
+            "c\t{}\t{}\t{}\t{}\t{}\t{}",
+            c.id,
+            c.first,
+            c.last,
+            c.islet as u8,
+            c.ring.len(),
+            digest(&c.ring)
+        )?;
+    }
+    println!("{} areas, {} coastline ways -> {}", areas.len(), coast.len(), dst);
+    Ok(())
+}
+
+/// Count and total area of the land polygons around a boundary, to compare with
+/// tools/land_extract.py.
+fn land(shp: &str, area: &str) -> Result<()> {
+    teasi::geos::available()?;
+    let l = teasi::land::extract(shp, &teasi::poly::load(area)?)?;
+    let total: f64 = l.iter().map(|p| p.area()).sum();
+    println!("{} land polygons, total area {}", l.len(), total);
+    if let Some(f) = l.first() {
+        let b = f.bounds();
+        println!("first: {:?} {} {}", b, f.area(), f.exterior().len());
+    }
+    Ok(())
+}
+
+fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<bool> {
+    if args.len() < 4 {
+        bail!("usage: teasi osmarea <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]");
+    }
+    teasi::geos::available()?;
+    let (src, area, orig, dst) = (&args[0], &args[1], &args[2], &args[3]);
+    let date = match args.get(4) {
+        Some(d) => d.clone(),
+        None => chart::today(),
+    };
+    let t0 = std::time::Instant::now();
+    println!("  libgeos {}", teasi::geos::version()?);
+    let ex = teasi::area::extract(src, &|s| println!("  {}", s))?;
+
+    let original = if orig == "-" { None } else { Some(Chart::open(orig)?) };
+    let rings = teasi::poly::load(area)?;
+    let land = match land {
+        Some(shp) => {
+            let l = teasi::land::extract(shp, &rings)?;
+            println!("  {} land polygons from {}", l.len(), shp);
+            Some(l)
+        }
+        None => None,
+    };
+    let p = teasi::osmarea::boundary(&rings)?;
+    let d = teasi::osmarea::build(
+        &ex,
+        &p,
+        original.as_ref(),
+        land,
+        date.as_bytes(),
+        country,
+        &chart::device(),
+        &|s| println!("  {}", s),
+    )?;
+    std::fs::write(dst, &d)?;
+    println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
+    Ok(true)
+}
+
 fn run() -> Result<bool> {
     let all: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<String> = all.iter().filter(|a| !a.starts_with("--")).cloned().collect();
@@ -514,6 +628,27 @@ fn run() -> Result<bool> {
                 bail!("usage: teasi poi <file.osm.pbf> <out>");
             }
             poi(&args[1], &args[2])
+        }
+        "area" => {
+            if args.len() != 3 {
+                bail!("usage: teasi area <file.osm.pbf> <out>");
+            }
+            area(&args[1], &args[2])?;
+            Ok(true)
+        }
+        "land" => {
+            if args.len() != 3 {
+                bail!("usage: teasi land <land_polygons.shp> <area.poly>");
+            }
+            land(&args[1], &args[2])?;
+            Ok(true)
+        }
+        "osmarea" => {
+            let country = match opt("country") {
+                Some(v) => v.parse().context("--country")?,
+                None => 4,
+            };
+            compile_osmarea(&args[1..], country, opt("land"))
         }
         "osmpoi" | "osmpoint" => {
             let country = match opt("country") {

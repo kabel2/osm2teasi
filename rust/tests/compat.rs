@@ -165,19 +165,53 @@ fn fsum_matches_pythons_sum() {
 }
 
 #[test]
-fn rings_are_joined_at_shared_ends() {
-    use teasi::osm::assemble_rings;
-    // two ways forming one ring, the second one reversed
-    let ways = vec![vec![1, 2, 3], vec![5, 4, 3], vec![1, 5]];
-    assert_eq!(assemble_rings(&ways), Some(vec![vec![1, 2, 3, 4, 5]]));
-    // a closed way is a ring of its own, minus the repeated end
-    assert_eq!(assemble_rings(&[vec![1, 2, 3, 1]]), Some(vec![vec![1, 2, 3]]));
-    // two independent rings
+fn segments_build_rings_and_cancel_in_pairs() {
+    use teasi::osm::assemble_segments;
+    let p = |x: i32, y: i32| (x, y);
+    // two open ways forming one ring, the second one reversed
+    let ways = vec![
+        vec![p(0, 0), p(4, 0), p(4, 4)],
+        vec![p(0, 4), p(4, 4)],
+        vec![p(0, 0), p(0, 4)],
+    ];
+    let rings = assemble_segments(&ways).unwrap();
+    assert_eq!(rings.len(), 1);
+    assert_eq!(rings[0].len(), 4);
+    // a closed way is a ring of its own
     assert_eq!(
-        assemble_rings(&[vec![1, 2, 1], vec![7, 8, 7]]),
-        Some(vec![vec![1, 2], vec![7, 8]])
+        assemble_segments(&[vec![p(0, 0), p(2, 0), p(2, 2), p(0, 0)]]),
+        Some(vec![vec![p(0, 0), p(2, 0), p(2, 2)]])
     );
-    assert_eq!(assemble_rings(&[vec![1, 2, 3]]), None); // stays open
+    // two squares sharing an edge: the shared segments cancel, one ring is left
+    let a = vec![p(0, 0), p(4, 0), p(4, 4), p(0, 4), p(0, 0)];
+    let b = vec![p(4, 0), p(8, 0), p(8, 4), p(4, 4), p(4, 0)];
+    let rings = assemble_segments(&[a, b]).unwrap();
+    assert_eq!(rings.len(), 1);
+    assert_eq!(rings[0].len(), 6, "the shared edge is gone: {:?}", rings[0]);
+    // a spike that doubles back disappears with its mirror segment
+    let spike = vec![p(0, 0), p(4, 0), p(6, 0), p(4, 0), p(4, 4), p(0, 0)];
+    assert_eq!(assemble_segments(&[spike]).unwrap()[0].len(), 3);
+    // an open ring builds no area at all
+    assert_eq!(assemble_segments(&[vec![p(0, 0), p(1, 0), p(1, 1)]]), None);
+}
+
+#[test]
+fn a_ring_touching_itself_is_split() {
+    use teasi::osm::split_rings;
+    let p = |x: i32, y: i32| (x, y);
+    // a figure of eight through (4,4): two rings, each starting at the touch
+    let eight =
+        vec![p(0, 0), p(4, 0), p(4, 4), p(8, 4), p(8, 8), p(4, 8), p(4, 4), p(0, 4)];
+    assert_eq!(
+        split_rings(&eight),
+        vec![
+            vec![p(4, 4), p(8, 4), p(8, 8), p(4, 8)],
+            vec![p(0, 0), p(4, 0), p(4, 4), p(0, 4)],
+        ]
+    );
+    // a plain ring stays whole, a two point stub is dropped
+    assert_eq!(split_rings(&[p(0, 0), p(1, 0), p(1, 1)]).len(), 1);
+    assert!(split_rings(&[p(0, 0), p(1, 0)]).is_empty());
 }
 
 #[test]
@@ -438,4 +472,163 @@ fn osmpoint_record_round_trip() {
     let rec = PointRec { hdr: vec![0x30, 19, 0, 1, 0], objs: vec![obj] };
     let raw = build_osmpoint(&rec);
     assert_eq!(parse_osmpoint(&raw).unwrap(), rec);
+}
+
+// --------------------------------------------------------------------------
+// GEOS (osmarea); skipped when libgeos cannot be loaded
+// --------------------------------------------------------------------------
+
+fn geos_here() -> bool {
+    match teasi::geos::available() {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("skipped: {}", e);
+            false
+        }
+    }
+}
+
+/// The values come from shapely 2.1.2 / GEOS 3.13.1 (see rust/README.md).
+#[test]
+fn geos_basics_match_shapely() {
+    if !geos_here() {
+        return;
+    }
+    use teasi::geos::Geom;
+    // shapely.box builds its ring starting at (x1, y0), counter-clockwise
+    let b = Geom::rect(10.0, 20.0, 30.0, 40.0).unwrap();
+    assert_eq!(
+        b.exterior(),
+        vec![(30.0, 20.0), (30.0, 40.0), (10.0, 40.0), (10.0, 20.0), (30.0, 20.0)]
+    );
+    assert_eq!(b.bounds(), (10.0, 20.0, 30.0, 40.0));
+    assert_eq!(b.area(), 400.0);
+    // two squares sharing an edge merge into one rectangle
+    let s1 = Geom::rect(0.0, 0.0, 10.0, 10.0).unwrap();
+    let s2 = Geom::rect(10.0, 0.0, 20.0, 10.0).unwrap();
+    let u = s1.union(&s2).unwrap();
+    assert_eq!(u.type_id(), 3);
+    assert_eq!(u.area(), 200.0);
+    let all = teasi::geos::union_all(&[s1.clone_geom().unwrap(), s2.clone_geom().unwrap()]).unwrap();
+    assert_eq!(all.area(), 200.0);
+    // a square with a hole: difference keeps it as one polygon with one ring
+    let hole = Geom::rect(2.0, 2.0, 4.0, 4.0).unwrap();
+    let d = s1.difference(&hole).unwrap();
+    assert_eq!(d.interiors().len(), 1);
+    assert_eq!(d.area(), 96.0);
+    // symmetric difference, clip and simplify
+    assert_eq!(s1.sym_difference(&hole).unwrap().area(), 96.0);
+    assert_eq!(s1.clip_by_rect(0.0, 0.0, 5.0, 10.0).unwrap().area(), 50.0);
+    let zig = Geom::polygon(
+        &[(0.0, 0.0), (10.0, 0.0), (10.0, 1.0), (5.0, 1.001), (0.0, 1.0), (0.0, 0.0)],
+        &[],
+    )
+    .unwrap();
+    // shapely: simplify(4.0) leaves a triangle, simplify(0.0005) keeps all points
+    assert_eq!(
+        zig.simplify(4.0).unwrap().exterior(),
+        vec![(0.0, 1.0), (10.0, 0.0), (10.0, 1.0), (0.0, 1.0)]
+    );
+    assert_eq!(zig.simplify(0.0005).unwrap().exterior().len(), 6);
+    assert!(s1.contains(&hole) && s1.intersects(&s2));
+    assert!(Geom::empty().unwrap().is_empty());
+}
+
+/// shapely's STRtree reports in tree order, not sorted; the order decides which
+/// polygon enters a union first, so it has to be the same.
+#[test]
+fn geos_strtree_order_matches_shapely() {
+    if !geos_here() {
+        return;
+    }
+    use teasi::geos::{Geom, Tree};
+    let order = [7, 3, 9, 0, 5, 1, 8, 2, 6, 4];
+    let gs: Vec<Geom> = order
+        .iter()
+        .map(|&i| {
+            let x = i as f64;
+            Geom::polygon(&[(x, 0.0), (x + 1.0, 0.0), (x + 1.0, 1.0), (x, 1.0), (x, 0.0)], &[])
+                .unwrap()
+        })
+        .collect();
+    let tree = Tree::new(&gs).unwrap();
+    let hit = tree.query(&Geom::rect(-1.0, -1.0, 11.0, 2.0).unwrap());
+    assert_eq!(hit, vec![3, 5, 7, 1, 9, 4, 8, 0, 6, 2]);
+}
+
+/// The tables of tools/compile_osmarea.py's area_class, spot-checked.
+#[test]
+fn area_class_matches_python() {
+    use teasi::area::ATags;
+    use teasi::osmarea::area_class;
+    let tags = |pairs: &[(&str, &str)]| {
+        ATags::of(pairs.iter().map(|&(k, v)| (k, v))).0
+    };
+    assert_eq!(area_class(&tags(&[("landuse", "residential")])), Some(("c3", None)));
+    assert_eq!(area_class(&tags(&[("landuse", "forest")])), Some(("c5", Some(6))));
+    assert_eq!(area_class(&tags(&[("natural", "heath")])), Some(("c5", Some(6))));
+    assert_eq!(area_class(&tags(&[("landuse", "basin")])), Some(("c6", None)));
+    assert_eq!(area_class(&tags(&[("natural", "water")])), Some(("c6", None)));
+    // natural=water + water=river is not in the original
+    assert_eq!(area_class(&tags(&[("natural", "water"), ("water", "river")])), None);
+    assert_eq!(area_class(&tags(&[("natural", "water"), ("water", "lake")])), Some(("c6", None)));
+    // landuse wins, but an unknown landuse falls through to natural
+    assert_eq!(
+        area_class(&tags(&[("landuse", "forest"), ("natural", "water")])),
+        Some(("c5", Some(6)))
+    );
+    assert_eq!(
+        area_class(&tags(&[("landuse", "nature_reserve"), ("natural", "beach")])),
+        Some(("c5", Some(9)))
+    );
+    assert_eq!(area_class(&tags(&[("leisure", "marina")])), Some(("c5", Some(5))));
+    assert_eq!(area_class(&tags(&[("leisure", "nature_reserve")])), None);
+    assert_eq!(area_class(&tags(&[("man_made", "breakwater")])), Some(("c5", Some(17))));
+    assert_eq!(area_class(&tags(&[("waterway", "dock")])), Some(("c6", None)));
+    assert_eq!(area_class(&tags(&[("amenity", "parking")])), None);
+    // area=no forbids an area, and KEYS decides whether it is kept at all
+    assert!(ATags::of([("area", "no"), ("landuse", "forest")].into_iter()).0.no_area);
+    assert!(ATags::of([("landuse", "forest")].into_iter()).1);
+    assert!(!ATags::of([("building", "yes")].into_iter()).1);
+}
+
+/// An osmarea C record built from objects must parse back to them.
+#[test]
+fn osmarea_record_round_trip() {
+    use std::collections::BTreeMap;
+    use teasi::layers::{self, Var, C_SPEC};
+    use teasi::osmarea::{make_object, record, CELL};
+    let cell = (100i64, 200i64);
+    let ring = |n: u32| {
+        (
+            n, // detail level
+            vec![
+                (cell.0 * CELL + 10, cell.1 * CELL + 20),
+                (cell.0 * CELL + 30, cell.1 * CELL + 20),
+                (cell.0 * CELL + 30, cell.1 * CELL + 40),
+                (cell.0 * CELL + 10, cell.1 * CELL + 20),
+            ],
+        )
+    };
+    let mut objs: BTreeMap<&str, Vec<layers::Item>> = BTreeMap::new();
+    objs.insert("c3", vec![make_object(cell, "", None, &[ring(12)], "c3")]);
+    objs.insert("c5", vec![make_object(cell, "", Some(8), &[ring(14), ring(9)], "c5")]);
+    objs.insert("c6", vec![make_object(cell, "#OW", None, &[ring(9)], "c6")]);
+    let raw = record(cell, &objs);
+    let rec = layers::parse_c(&raw).unwrap();
+    assert_eq!(layers::build_arrays(&rec, &C_SPEC), raw);
+    assert_eq!(rec.hdr[1], cell.1 as u32);
+    assert_eq!((rec.hdr[7], rec.hdr[11], rec.hdr[13]), (1, 1, 1));
+    let c5 = &rec.get("c5", &C_SPEC)[0];
+    assert_eq!(c5.s[2], 8); // the class
+    assert_eq!(c5.s[3], 20 << 16 | 10); // low corner, relative to the cell
+    assert_eq!(c5.s[4], 40 << 16 | 30); // high corner
+    let Var::U32(geom) = &c5.v[1] else { panic!("geometry") };
+    let parts = layers::geometry_parts(geom);
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].0, 14); // detail level of the first ring
+    assert_eq!(parts[0].1.len(), 4);
+    assert_eq!(parts[1].0, 9);
+    let Var::U16(name) = &rec.get("c6", &C_SPEC)[0].v[0] else { panic!("name") };
+    assert_eq!(layers::u16str(name), "#OW");
 }

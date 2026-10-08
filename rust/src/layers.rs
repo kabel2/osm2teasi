@@ -227,6 +227,21 @@ pub fn build_arrays(rec: &ArrayRec, _spec: &[ArraySpec]) -> Vec<u8> {
     out
 }
 
+/// Split a geometry u32 array into parts [(hi, points)].  Each part is a u32
+/// (hi << 16 | n) followed by n packed points; for lines hi == n, for osmarea
+/// polygons hi is a detail level 9..14.
+pub fn geometry_parts(g: &[u32]) -> Vec<(u32, &[u32])> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < g.len() {
+        let n = (g[i] & 0xFFFF) as usize;
+        let end = (i + 1 + n).min(g.len());
+        out.push((g[i] >> 16, &g[i + 1..end]));
+        i = end;
+    }
+    out
+}
+
 pub fn parse_d(raw: &[u8]) -> Result<ArrayRec> {
     parse_arrays(raw, D_HDR, &D_SPEC)
 }
