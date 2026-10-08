@@ -12,8 +12,9 @@ format with a proprietary codec, though: they are an MD5 checksum, **PC1** encry
 their containers are rebuilt byte for byte, and each one has a compiler that builds it
 from a Geofabrik extract.
 
-**Status:** Great Britain is built completely and runs on the device — map, POIs, elevation
-profile, address search and routing. What is left is a handful of individual fields, see
+**Status:** maps for every Geofabrik region of the world (264 of them) are built, and
+Great Britain, Germany and Denmark run on the device — map, POIs, elevation profile,
+address search and routing. What is left is a handful of individual fields, see
 [docs/CHART_FILES.md](docs/CHART_FILES.md), section 8.
 
 **Tested on:**
@@ -52,6 +53,7 @@ rust/             everything: the shell, reading OSM, all six compilers, the DEM
 docs/             format documentation, start with CHART_FILES.md
 ghidra_scripts/   headless scripts for analysing the firmware in Ghidra
 tools/            build_world.sh and its region list: every Geofabrik region as a zip
+web/              download page and browser installer for those zips
 ```
 
 One binary, `teasi`, with a subcommand per job — [rust/README.md](rust/README.md) describes
@@ -59,7 +61,10 @@ them all. No other runtime and no build step beyond `cargo build`.
 
 ## Building a map
 
-Everything in one command, for the country of your choice:
+Everything in one command, for the country of your choice. Either take the Linux binary
+from the [releases](https://github.com/kabel2/osm2teasi/releases) or build it with
+`cd rust && cargo build --release`; in both cases libgeos has to be installed
+(`apt install libgeos-c1t64`, on older Debian/Ubuntu `libgeos-c1v5`).
 
 ```bash
 cd rust && cargo build --release
@@ -87,8 +92,8 @@ What you need:
   [osmdata.openstreetmap.de](https://osmdata.openstreetmap.de/data/land-polygons.html)
   (split, WGS84) for `--land=`. Without them the water areas have no coastline to end at
   and the relief images get no land cover; everything else works.
-- **libgeos**, which is opened at run time, so `cargo build` does not need it — see
-  `rust/src/geos.rs`. Only `osmarea`, `osm`, `ta` and `terrain` use it.
+- **libgeos** (see above), which is opened at run time, so `cargo build` does not need it —
+  see `rust/src/geos.rs`. Only `osmarea`, `osm`, `ta` and `terrain` use it.
 - the **elevation tiles**, which `teasi all` downloads itself from the public Copernicus
   bucket (234 of them for Great Britain) and caches in `out/dem_tiles`.
 
@@ -118,7 +123,9 @@ and leaves one zip per region, with a README inside, in a folder per continent. 
 downloads one extract at a time, deletes it once the maps are built, signs with
 `--generic` and skips regions whose zip is already there, so it can be interrupted and
 started again. Extracts bigger than a third of the machine's memory are left out
-(`MAX_PBF_MB`); with 29 GB that is none of them.
+(`MAX_PBF_MB`); with 29 GB that is none of them. `ONLY=ta` rebuilds just that layer in
+the zips that are already there. [web/](web/) serves the result: a download page and an
+installer that copies a map onto the device straight from Chrome or Edge.
 
 The list is generated: `teasi regions > tools/regions.tsv` reads Geofabrik's index and
 matches it against the firmware's country list. A country whose parts all have a code of

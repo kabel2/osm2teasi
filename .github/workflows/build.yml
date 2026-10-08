@@ -1,0 +1,38 @@
+# Tests on every push; a tag v* also attaches a Linux binary to a release.
+# Built on the oldest supported Ubuntu, so the binary runs on any glibc since
+# 2.35.  libgeos is not linked but opened at run time (rust/src/geos.rs).
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo test --release
+      - run: cargo build --release
+      - name: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name=teasi-${GITHUB_REF_NAME}-linux-x86_64
+          mkdir "$name"
+          cp target/release/teasi ../LICENSE "$name/"
+          tar czf "$name.tar.gz" "$name"
+          gh release create "$GITHUB_REF_NAME" "$name.tar.gz" --title "$GITHUB_REF_NAME" --generate-notes

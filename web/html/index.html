@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teasi Maps</title>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --mute: #6b6b70; --line: #e3e3e6; --link: #0b62c4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --fg: #ececef; --mute: #9a9aa2; --line: #2c2c31; --link: #6aa9ff; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif;
+         max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6em; margin: 0 0 4px; }
+  h2 { font-size: 1.15em; margin: 32px 0 6px; }
+  p, li { color: var(--fg); }
+  .mute { color: var(--mute); }
+  a { color: var(--link); }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit;
+          background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.size { text-align: right; white-space: nowrap; color: var(--mute); }
+  td.region { color: var(--mute); font-size: .9em; }
+</style>
+</head>
+<body>
+<h1>Teasi maps from OpenStreetMap</h1>
+<p class="mute">Maps for the Teasi PRO bike navigator, one zip per country or region:
+street map, address search, POIs, routing and elevation.</p>
+
+<h2>How to install</h2>
+<ol>
+  <li>Connect the Teasi by USB and confirm the connection on its display.</li>
+  <li>Unzip the download and copy every <code>*.v2026…</code> file into
+      <code>BikeNav/Map/Countries/</code>.</li>
+  <li>Delete an older map of the same country first, or the device may keep using it.
+      For Denmark, Germany, Norway and Sweden the original maps are also listed in
+      <code>BikeNav/packages.xml</code>: without fixing those entries the Teasi warns
+      “Karten nicht korrekt installiert” at startup (the map works anyway).</li>
+</ol>
+<p><b>Easier:</b> the <a href="/install/">installer</a> does all of this from Chrome or Edge —
+choose the Teasi drive, pick a map, done.</p>
+<p class="mute">The maps run on devices from the 19 production batches (2013–2019) that share
+the built-in key, i.e. whose serial number starts with one of
+<code>20130125 20130212 20130213 20130807 20131010 20131020 20131026 20150215 20160505 20160509
+20161014 20161028 20170606 20170707 20180914 20181225 20190320 20190415 20190618</code>, and only for countries the device is licensed for.
+Each zip has a README with details and checksums. Downloads are capped at 10&nbsp;Mbit/s in total,
+so a big country takes a while.</p>
+
+<h2>Maps</h2>
+<input id="q" type="search" placeholder="Filter, e.g. germany" autocomplete="off">
+<div id="list"><p class="mute">Loading…</p></div>
+
+<p class="mute" style="margin-top:32px">Map data © OpenStreetMap contributors, ODbL 1.0.
+Elevation: Copernicus DEM GLO-90. Built with
+<a href="https://github.com/kabel2/osm2teasi">osm2teasi</a>, which also builds maps yourself.
+Not affiliated with the maker of the Teasi.
+<a href="maps/">All files</a></p>
+
+<script>
+const folder = c => c.replace(/\b./g, s => s.toUpperCase());
+const mb = b => (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB';
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let rows = [];
+
+function show() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const by = {};
+  for (const r of rows)
+    if (!q || (r.country + ' ' + r.region).toLowerCase().includes(q))
+      (by[r.continent] ||= []).push(r);
+  const out = [];
+  for (const c of Object.keys(by).sort()) {
+    out.push('<h2>' + esc(folder(c)) + '</h2><table>');
+    for (const r of by[c].sort((a, b) => a.country.localeCompare(b.country) || a.name.localeCompare(b.name))) {
+      const pretty = r.name.replace(/-/g, ' ');
+      const sub = pretty.toLowerCase() === r.country.toLowerCase() ? '' : pretty;
+      out.push('<tr><td><a href="maps/' + esc(folder(c)) + '/' + esc(r.name) + '.zip">' + esc(r.country) +
+               '</a></td><td class="region">' + esc(sub) + '</td><td class="size">' + mb(r.bytes) + '</td></tr>');
+    }
+    out.push('</table>');
+  }
+  document.getElementById('list').innerHTML =
+    out.join('') || '<p class="mute">' + (rows.length ? 'Nothing matches.' : 'No maps yet.') + '</p>';
+}
+
+fetch('maps/report.tsv', {cache: 'no-cache'})
+  .then(r => r.ok ? r.text() : '')
+  .then(t => {
+    const seen = new Map();
+    for (const line of t.split('\n').slice(1)) {
+      const [region, country, status, , bytes] = line.split('\t');
+      if (status !== 'ok') continue;
+      const [continent, ...rest] = region.split('/');
+      seen.set(region, {continent, name: rest[rest.length - 1], region, country, bytes: +bytes});
+    }
+    rows = [...seen.values()];
+    show();
+  })
+  .catch(() => { document.getElementById('list').innerHTML = '<p class="mute">Could not load the list. <a href="maps/">Browse the files</a>.</p>'; });
+document.getElementById('q').addEventListener('input', show);
+</script>
+</body>
+</html>

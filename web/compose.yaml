@@ -1,0 +1,21 @@
+# Teasi map downloads (/) and the browser installer (/install/): nginx with
+# https behind a 10 Mbit/s shaper shared by all downloads.
+#   docker compose up -d --build
+# The maps go into ./maps (same layout as build_world.sh's output: report.tsv
+# plus one folder per continent).
+services:
+  teasi-maps:
+    build: .
+    container_name: teasi-maps
+    restart: unless-stopped
+    ports:
+      - "8088:443"         # https, certificate from certbot-node
+    cap_add:
+      - NET_ADMIN          # only for tc inside the container's own network
+    environment:
+      RATE: 10mbit         # total for all downloads together
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./html:/usr/share/nginx/html:ro
+      - ./maps:/data/maps:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro   # wherever certbot keeps it

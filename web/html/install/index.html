@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teasi Map Installer</title>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --mute: #6b6b70; --line: #e3e3e6; --link: #0b62c4;
+          --ok: #1a7f37; --bad: #c62828; --bar: #0b62c4; --box: #f5f5f7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17171a; --fg: #ececef; --mute: #9a9aa2; --line: #2c2c31; --link: #6aa9ff;
+            --ok: #4cc26b; --bad: #ff6b6b; --bar: #6aa9ff; --box: #202024; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif;
+         max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.6em; margin: 0 0 4px; }
+  h2 { font-size: 1.15em; margin: 32px 0 6px; }
+  .mute { color: var(--mute); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  a { color: var(--link); }
+  button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--box); color: var(--fg); cursor: pointer; }
+  button.main { background: var(--link); border-color: var(--link); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=search] { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit;
+          background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  td.n { text-align: right; white-space: nowrap; color: var(--mute); }
+  td.b { text-align: right; width: 1%; }
+  td.region { color: var(--mute); font-size: .9em; }
+  #list { max-height: 420px; overflow-y: auto; margin-top: 8px; }
+  .box { background: var(--box); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
+  progress { width: 100%; height: 14px; accent-color: var(--bar); }
+  #log { font: 13px/1.45 ui-monospace, monospace; white-space: pre-wrap; color: var(--mute);
+         max-height: 220px; overflow-y: auto; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<h1>Teasi map installer</h1>
+<p class="mute">Puts a map from OpenStreetMap onto a Teasi PRO straight from the browser: it
+deletes the old map of that country, writes the new files while they download, and fixes the
+entries in <code>BikeNav/packages.xml</code> so the device does not complain at startup.</p>
+
+<div id="nosupport" class="box bad" hidden>This browser cannot write to a drive. Use Chrome,
+Edge or another Chromium-based browser on a computer (not on a phone).</div>
+
+<h2>1. Connect the Teasi</h2>
+<p>Connect it by USB, confirm the connection on its display, then choose the Teasi drive
+(or its <code>BikeNav</code> folder) and allow editing.</p>
+<button id="pick" class="main">Choose the Teasi…</button>
+<div id="device"></div>
+
+<h2>2. Choose a map</h2>
+<input id="q" type="search" placeholder="Filter, e.g. germany" autocomplete="off">
+<div id="list"><p class="mute">Loading…</p></div>
+<p class="mute">Or install a zip you downloaded already:
+  <input id="zip" type="file" accept=".zip"></p>
+
+<h2>3. Install</h2>
+<div id="job"><p class="mute">Nothing running.</p></div>
+
+<p class="mute" style="margin-top:32px">Downloads share 10&nbsp;Mbit/s, so a big country takes a
+while (Germany, 1.5&nbsp;GB: about 20 minutes). Keep this tab open until it says done, then eject
+the drive before you unplug the Teasi. Map data © OpenStreetMap contributors, ODbL 1.0; elevation
+Copernicus DEM GLO-90. Not affiliated with the maker of the Teasi. <a href="/">Download page</a> · <a href="/maps/">All files</a></p>
+
+<script src="flash.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mb = b => b >= 1e9 ? (b / 1073741824).toFixed(2) + ' GB' : (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB';
+const folder = c => c.replace(/\b./g, s => s.toUpperCase());
+let dev = null, rows = [], busy = false;
+
+if (!window.showDirectoryPicker) { $('nosupport').hidden = false; $('pick').disabled = true; }
+
+// ---- the device ----
+
+async function showDevice() {
+  const maps = await installedMaps(dev);
+  const names = Object.keys(maps).sort();
+  let h = '<div class="box"><b>' + esc(dev.model || 'Teasi') + '</b>' +
+          (dev.serial ? ', serial ' + esc(dev.serial) : '') + ' ' +
+          (dev.supported ? '<span class="ok">— supported</span>'
+                         : '<span class="bad">— serial batch not in the list, the maps will not open on it</span>') +
+          '<table style="margin-top:8px">';
+  for (const n of names)
+    h += '<tr><td>' + esc(n.replace(/_/g, ' ')) + '</td><td class="n">' + esc(maps[n].date) +
+         '</td><td class="n">' + mb(maps[n].bytes) + '</td><td class="b"><button data-rm="' + esc(n) +
+         '">Remove</button></td></tr>';
+  h += '</table>' + (names.length ? '' : '<p class="mute">No maps on the device.</p>') + '</div>';
+  $('device').innerHTML = h;
+  for (const b of $('device').querySelectorAll('[data-rm]')) b.onclick = () => remove(b.dataset.rm);
+  showList();
+}
+
+$('pick').onclick = async () => {
+  try {
+    const dir = await showDirectoryPicker({id: 'teasi', mode: 'readwrite'});
+    dev = await openDevice(dir);
+    await showDevice();
+  } catch (e) {
+    if (e.name !== 'AbortError') $('device').innerHTML = '<div class="box bad">' + esc(e.message) + '</div>';
+  }
+};
+
+async function remove(prefix) {
+  if (busy || !confirm('Remove the map ' + prefix.replace(/_/g, ' ') + ' from the Teasi?')) return;
+  busy = true;
+  const out = [];
+  try { await removeMap(dev, prefix, s => out.push(s)); }
+  catch (e) { out.push('failed: ' + e.message); }
+  busy = false;
+  job('<p>Removed ' + esc(prefix) + '.</p><div id="log">' + esc(out.join('\n')) + '</div>');
+  await showDevice();
+}
+
+// ---- the map list ----
+
+function showList() {
+  const q = $('q').value.trim().toLowerCase();
+  const by = {};
+  for (const r of rows)
+    if (!q || (r.country + ' ' + r.region).toLowerCase().includes(q)) (by[r.continent] ||= []).push(r);
+  const out = [];
+  for (const c of Object.keys(by).sort()) {
+    out.push('<h2>' + esc(folder(c)) + '</h2><table>');
+    for (const r of by[c].sort((a, b) => a.country.localeCompare(b.country) || a.name.localeCompare(b.name))) {
+      const pretty = r.name.replace(/-/g, ' ');
+      const sub = pretty.toLowerCase() === r.country.toLowerCase() ? '' : pretty;
+      out.push('<tr><td>' + esc(r.country) + '</td><td class="region">' + esc(sub) + '</td><td class="n">' +
+               mb(r.bytes) + '</td><td class="b"><button data-url="' + esc(r.url) + '"' +
+               (dev ? '' : ' disabled') + '>Install</button></td></tr>');
+    }
+    out.push('</table>');
+  }
+  $('list').innerHTML = out.join('') || '<p class="mute">' + (rows.length ? 'Nothing matches.' : 'No maps yet.') + '</p>';
+  for (const b of $('list').querySelectorAll('[data-url]')) b.onclick = () => fromServer(b.dataset.url);
+}
+
+fetch('/maps/report.tsv', {cache: 'no-cache'}).then(r => r.ok ? r.text() : '').then(t => {
+  const seen = new Map();
+  for (const line of t.split('\n').slice(1)) {
+    const [region, country, status, , bytes] = line.split('\t');
+    if (status !== 'ok') continue;
+    const parts = region.split('/'), continent = parts[0], name = parts[parts.length - 1];
+    seen.set(region, {continent, name, region, country, bytes: +bytes,
+                      url: '/maps/' + folder(continent) + '/' + name + '.zip'});
+  }
+  rows = [...seen.values()];
+  showList();
+}).catch(() => { $('list').innerHTML = '<p class="mute">Could not load the list.</p>'; });
+$('q').addEventListener('input', showList);
+
+// ---- installing ----
+
+function job(html) { $('job').innerHTML = html; }
+
+async function fromServer(url) {
+  if (busy) return;
+  try {
+    const r = await fetch(url, {headers: {Range: 'bytes=-65536'}});
+    const range = r.headers.get('Content-Range');
+    if (r.status !== 206 || !range) throw new Error('the server did not answer the range request');
+    const size = +range.split('/')[1];
+    const files = centralDirectory(new Uint8Array(await r.arrayBuffer()), size);
+    await run(files, size, url.split('/').pop(), async () => {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('download failed: HTTP ' + resp.status);
+      return resp.body;
+    });
+  } catch (e) { job('<p class="bad">' + esc(e.message) + '</p>'); }
+}
+
+$('zip').onchange = async () => {
+  const f = $('zip').files[0];
+  $('zip').value = '';
+  if (!f || busy) return;
+  if (!dev) { job('<p class="bad">Choose the Teasi first (step 1).</p>'); return; }
+  try {
+    const files = centralDirectory(new Uint8Array(await f.slice(-65536).arrayBuffer()), f.size);
+    await run(files, f.size, f.name, async () => f.stream());
+  } catch (e) { job('<p class="bad">' + esc(e.message) + '</p>'); }
+};
+
+async function run(files, size, label, open) {
+  const charts = files.filter(f => CHART.test(f.name));
+  if (!charts.length) throw new Error(label + ' has no Teasi map files');
+  const prefix = CHART.exec(charts[0].name)[1];
+  const old = await oldFiles(dev, prefix);
+  const need = charts.reduce((n, f) => n + f.size, 0);
+  if (!confirm('Install ' + prefix.replace(/_/g, ' ') + ' (' + mb(need) + ') on the Teasi?' +
+               (old.length ? '\n\nThis deletes the map that is there now:\n' + old.join('\n') : '') +
+               '\n\nThe entries in packages.xml are updated; the first time, the original is kept as ' +
+               'BikeNav/packages.orig.xml.')) return;
+  busy = true;
+  const lines = [], t0 = Date.now();
+  let got = 0, last = 0, lock = null;
+  job('<p>Installing <b>' + esc(prefix.replace(/_/g, ' ')) + '</b>…</p><progress id="bar" max="' + size +
+      '" value="0"></progress><div id="stat" class="mute"></div><div id="log"></div>');
+  const log = s => { lines.push(s); $('log').textContent = lines.join('\n'); $('log').scrollTop = 1e9; };
+  const tick = n => {
+    got += n;
+    const now = Date.now();
+    if (now - last < 250) return;
+    last = now;
+    $('bar').value = got;
+    const rate = got / Math.max(1, (now - t0) / 1000), left = (size - got) / Math.max(rate, 1);
+    $('stat').textContent = mb(got) + ' of ' + mb(size) + ' · ' + (rate * 8 / 1e6).toFixed(1) + ' Mbit/s · ' +
+                            (left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s') + ' left';
+  };
+  window.onbeforeunload = () => 'The map is still being written.';
+  try { lock = await navigator.wakeLock?.request('screen'); } catch {}
+  try {
+    await install(dev, await open(), prefix, log, tick);
+    $('bar').value = size;
+    $('stat').innerHTML = '<span class="ok">Done in ' + Math.round((Date.now() - t0) / 1000) +
+                          ' s. Eject the drive, unplug the Teasi and start it.</span>';
+  } catch (e) {
+    log('failed: ' + e.message);
+    $('stat').innerHTML = '<span class="bad">Failed: ' + esc(e.message) +
+      '. If the drive is full, remove another map above and try again.</span>';
+  } finally {
+    busy = false;
+    window.onbeforeunload = null;
+    lock?.release().catch(() => {});
+    await showDevice().catch(() => {});
+  }
+}
+</script>
+</body>
+</html>
