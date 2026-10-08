@@ -836,6 +836,25 @@ fn outward_codes_match_python() {
 }
 
 #[test]
+fn postcode_keys() {
+    use teasi::ta::postcode_key;
+    let cases: [(&str, Option<&str>); 9] = [
+        ("SW1A 1AA", Some("SW1A")),
+        ("SW1A", Some("SW1A")),
+        ("46325", Some("46325")),
+        (" 46325 ", Some("46325")),
+        ("1234 AB", Some("1234")),
+        ("K1A 0B1", Some("K1A")),
+        ("00-950", Some("00-950")),
+        ("London", None),
+        ("46325;46326", None),
+    ];
+    for (s, want) in cases {
+        assert_eq!(postcode_key(s).as_deref(), want, "postcode key of {:?}", s);
+    }
+}
+
+#[test]
 fn split_cells_matches_python() {
     let r = teasi::ta::split_cells(&[(32700.0, 100.0), (33000.0, 200.0), (65600.0, 300.0)]);
     let cells: Vec<(i64, i64)> = r.iter().map(|(c, _)| *c).collect();
@@ -883,6 +902,9 @@ fn index_keys_match_python() {
     );
     assert_eq!(teasi::ta::keys("SW1A"), ["sw1a"]);
     assert_eq!(teasi::ta::keys("\u{c5}rhus"), ["arhus"]);
+    // the region behind the name is not a key
+    assert_eq!(teasi::ta::keys("Borken (Nordrhein-Westfalen)"), ["borken"]);
+    assert_eq!(teasi::ta::keys("Bocholt, Biemenhorst (Nordrhein-Westfalen)"), ["biemenhorst", "bocholt"]);
 }
 
 /// A tiny generator the Python reference shared, so that the shapes in the

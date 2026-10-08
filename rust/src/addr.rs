@@ -2,7 +2,8 @@
 //!
 //! Three passes over the file, because a relation's geometry needs its member
 //! ways and those need their nodes:
-//!   1. relations: which multipolygons carry address or place tags
+//!   1. relations: which multipolygons carry address or place tags, and the
+//!      administrative boundaries the place names are told apart by
 //!   2. ways: interpolation ways, closed ways (areas) and the member ways
 //!   3. nodes: the results that are nodes, the coordinates the ways need and
 //!      the house numbers of the interpolation nodes
@@ -13,6 +14,13 @@ use anyhow::Result;
 use osmpbf::PrimitiveBlock;
 
 use crate::pbf::{area_centre, area_rings, par_blocks, xy_dm, NodeIndex};
+
+/// The admin levels a place name is told apart by: the region (level 4: state,
+/// province) goes into parentheses behind every name, as in the original maps
+/// ("Borken (Nordrhein-Westfalen)"); the levels below it (county,
+/// municipality; which of 5 to 8 a country uses differs) only behind names
+/// that the region leaves ambiguous.
+pub const ADMIN_LEVELS: [u8; 5] = [4, 5, 6, 7, 8];
 
 /// place=* values the Python extractor keeps.
 pub const PLACES: [&str; 13] = [
@@ -60,6 +68,22 @@ struct Tags {
     interpolation: Option<Box<str>>,
     any: bool,
     multipolygon: bool,
+    administrative: bool,
+    admin_level: Option<Box<str>>,
+}
+
+impl Tags {
+    fn region_level(&self) -> Option<u8> {
+        if !(self.multipolygon && self.administrative && self.place.name.is_some()) {
+            return None;
+        }
+        let l: u8 = self.admin_level.as_deref()?.trim().parse().ok()?;
+        ADMIN_LEVELS.contains(&l).then_some(l)
+    }
+
+    fn is_region(&self) -> bool {
+        self.region_level().is_some()
+    }
 }
 
 fn tags_of<'a, I: Iterator<Item = (&'a str, &'a str)>>(it: I) -> Tags {
@@ -82,6 +106,8 @@ fn tags_of<'a, I: Iterator<Item = (&'a str, &'a str)>>(it: I) -> Tags {
             "is_in" => t.place.is_in = s(),
             // libosmium's MultipolygonManager assembles both of these
             "type" => t.multipolygon = v == "multipolygon" || v == "boundary",
+            "boundary" => t.administrative = v == "administrative",
+            "admin_level" => t.admin_level = s(),
             _ => {}
         }
     }
@@ -111,11 +137,21 @@ pub struct Interp {
     pub pts: Vec<(f64, f64, Option<Box<str>>, Option<Box<str>>)>,
 }
 
+/// An administrative area (state, county, municipality) by name, its rings
+/// unsorted: a point is inside when it is inside an odd number of them.
+#[derive(Clone, Debug)]
+pub struct Region {
+    pub level: u8,
+    pub name: Box<str>,
+    pub rings: Vec<Vec<(f64, f64)>>,
+}
+
 #[derive(Default)]
 pub struct Extract {
     pub addr: Vec<Addr>,
     pub places: Vec<Place>,
     pub interp: Vec<Interp>,
+    pub regions: Vec<Region>,
 }
 
 /// A way we have to look at in pass 3, with its node ids.
@@ -158,7 +194,9 @@ fn pass1(path: &str) -> Result<Vec<RelCand>> {
             for group in block.groups() {
                 for r in group.relations() {
                     let tags = tags_of(r.tags());
-                    if !tags.multipolygon || !(tags.addr.is_addr() || tags.place.is_place()) {
+                    if !tags.multipolygon
+                        || !(tags.addr.is_addr() || tags.place.is_place() || tags.is_region())
+                    {
                         continue;
                     }
                     // every way member, once: libosmium ignores the roles too, and
@@ -311,7 +349,8 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
 
     let since = lap();
 
-    let mut out = Extract { addr: p3.addr, places: p3.places, interp: Vec::new() };
+    let mut out =
+        Extract { addr: p3.addr, places: p3.places, interp: Vec::new(), regions: Vec::new() };
 
     // areas: closed ways (one ring each) and multipolygons (one per member way)
     let by_id: HashMap<i64, &WayGeom> = p2.members.iter().map(|g| (g.id, g)).collect();
@@ -344,17 +383,36 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
     for g in std::mem::take(&mut p2.areas) {
         add(g.tags, std::slice::from_ref(&g.refs));
     }
+    let mut regions = Vec::new();
     for r in rels {
         let ways: Vec<Vec<i64>> = r
             .ways
             .iter()
             .filter_map(|w| by_id.get(w).map(|g| g.refs.clone()))
             .collect();
+        // a region cut by the edge of the extract does not close; leave it out
+        if r.tags.is_region() {
+            if let Some(rings) = area_rings(&ways, &index) {
+                regions.push(Region {
+                    level: r.tags.region_level().unwrap_or_default(),
+                    name: r.tags.place.name.clone().unwrap_or_default(),
+                    rings,
+                });
+            }
+            if !(r.tags.addr.is_addr() || r.tags.place.is_place()) {
+                continue;
+            }
+        }
         add(r.tags, &ways);
     }
+    regions.sort_by(|a, b| (a.level, &a.name).cmp(&(b.level, &b.name)));
+    out.regions = regions;
     log(&since(format!(
-        "areas: {} from closed ways, {} from relations ({} without a closed ring)",
-        n_closed, n_rels, open_rings
+        "areas: {} from closed ways, {} from relations ({} without a closed ring), {} regions",
+        n_closed,
+        n_rels,
+        open_rings,
+        out.regions.len()
     )));
 
     // interpolation ways with the house numbers of their nodes

@@ -21,9 +21,9 @@ use std::f64::consts::PI;
 use anyhow::Result;
 use rayon::prelude::*;
 
-use crate::addr::{Addr, Extract, Interp, Place};
+use crate::addr::{Addr, Extract, Interp, Place, Region};
 use crate::chart;
-use crate::geos::Geom;
+use crate::geos::{Geom, Prepared, Tree};
 use crate::grid::Grid;
 use crate::layers::{self, u16enc, AItem, ARec, ArrayRec, Item, Sub18, Var, D_SPEC, LAYER_TA};
 use crate::osm::{sort_key, LEN_FACTOR};
@@ -217,6 +217,20 @@ pub fn house_numbers(s: &str) -> Vec<i64> {
     } else {
         Vec::new()
     }
+}
+
+/// What a postcode is searched by: the outward code of a British one (`SW1A`),
+/// otherwise the code up to the first space (`46325`, `1234` of `1234 AB`,
+/// `K1A` of `K1A 0B1`).  A value without a digit is no postcode.
+pub fn postcode_key(pc: &str) -> Option<String> {
+    if let Some(o) = outward(pc) {
+        return Some(o);
+    }
+    let k = pc.split_whitespace().next()?.to_uppercase();
+    (k.len() <= 10
+        && k.chars().any(|c| c.is_ascii_digit())
+        && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+    .then_some(k)
 }
 
 /// The outward code of a British postcode: `^([A-Z]{1,2}[0-9][A-Z0-9]?) ?[0-9][A-Z]{2}$`
@@ -549,7 +563,7 @@ pub struct Hit {
     pub right: bool,
     pub n: i64,
     pub city: Option<Box<str>>,
-    /// outward code of the postcode
+    /// the postcode as it is searched for, see [`postcode_key`]
     pub pc: Option<Box<str>>,
 }
 
@@ -572,7 +586,7 @@ pub fn match_addresses(
     let mut pts: Vec<Num> = Vec::new();
     for a in addr {
         let Some(street) = a.tags.street.as_deref().filter(|s| !s.is_empty()) else { continue };
-        let pc = a.tags.postcode.as_deref().and_then(outward);
+        let pc = a.tags.postcode.as_deref().and_then(postcode_key);
         for n in house_numbers(a.tags.hn.as_deref().unwrap_or("")) {
             if 0 < n && n < 0x7FFF {
                 pts.push(Num {
@@ -735,6 +749,159 @@ pub fn match_addresses(
 }
 
 // ---- 3. places -----------------------------------------------------------
+
+/// One administrative level of the country as GEOS polygons, to look up
+/// which area a point lies in.
+struct Admin {
+    names: Vec<Box<str>>,
+    geoms: Vec<Geom>,
+}
+
+impl Admin {
+    fn new(rs: &[Region], level: u8) -> Result<Admin> {
+        let (mut names, mut geoms) = (Vec::new(), Vec::new());
+        for r in rs.iter().filter(|r| r.level == level) {
+            // even-odd over the rings: a hole (Bremen in Niedersachsen) is a
+            // second ring around the same area
+            let mut g: Option<Geom> = None;
+            for ring in r.rings.iter().filter(|r| r.len() >= 4) {
+                let p = Geom::polygon(ring, &[])?.valid()?;
+                g = Some(match g {
+                    None => p,
+                    Some(a) => a.sym_difference(&p)?,
+                });
+            }
+            if let Some(g) = g.filter(|g| !g.is_empty()) {
+                names.push(r.name.clone());
+                geoms.push(g);
+            }
+        }
+        Ok(Admin { names, geoms })
+    }
+}
+
+struct Lookup<'a> {
+    names: &'a [Box<str>],
+    prep: Vec<Prepared<'a>>,
+    tree: Tree<'a>,
+}
+
+impl<'a> Lookup<'a> {
+    fn new(a: &'a Admin) -> Result<Lookup<'a>> {
+        let prep = a.geoms.iter().map(Prepared::new).collect::<Result<_>>()?;
+        Ok(Lookup { names: &a.names, prep, tree: Tree::new(&a.geoms)? })
+    }
+
+    fn at(&self, x: f64, y: f64) -> Option<&'a str> {
+        if self.names.is_empty() {
+            return None;
+        }
+        let pt = Geom::rect(x, y, x + 1e-3, y + 1e-3).ok()?;
+        let mut hits = self.tree.query(&pt);
+        hits.sort_unstable();
+        hits.into_iter().find(|&i| self.prep[i].intersects(&pt)).map(|i| &*self.names[i])
+    }
+}
+
+/// Places of the same name and region farther apart than this are different
+/// places and get the county (and the municipality) as well.
+const SAME_PLACE: f64 = 5000.0 / 0.149;
+
+/// The names places are shown and searched under, for every (name, point):
+/// `Borken (Nordrhein-Westfalen)`, and where the region leaves several places
+/// of one name, `Berg (Bayern, Landkreis Passau)` or, if the county does not
+/// tell them apart either, `Berg (Bayern, Landkreis Passau, Fürstenzell)`.  A
+/// name that already ends in parentheses (`Borken (Hessen)`) stays as it is.
+fn place_names(items: &[(Box<str>, f64, f64)], regions: &[Region]) -> Result<Vec<Box<str>>> {
+    let admin: Vec<Admin> =
+        crate::addr::ADMIN_LEVELS.iter().map(|&l| Admin::new(regions, l)).collect::<Result<_>>()?;
+    let look: Vec<Lookup> = admin.iter().map(Lookup::new).collect::<Result<_>>()?;
+    let region: Vec<Option<&str>> = items.iter().map(|(_, x, y)| look[0].at(*x, *y)).collect();
+    let mut extra: Vec<Vec<&str>> = vec![Vec::new(); items.len()];
+
+    let mut groups: HashMap<(&str, Option<&str>), Vec<usize>> = HashMap::new();
+    for (i, (name, _, _)) in items.iter().enumerate() {
+        if !name.ends_with(')') {
+            groups.entry((&**name, region[i])).or_default().push(i);
+        }
+    }
+    // one cluster per place: members closer than SAME_PLACE to its first point
+    let clusters = |members: &[usize]| -> Vec<usize> {
+        let mut first: Vec<usize> = Vec::new();
+        members
+            .iter()
+            .map(|&i| {
+                let (_, x, y) = items[i];
+                let near = first.iter().position(|&f| {
+                    let (_, fx, fy) = items[f];
+                    (fx - x).hypot(fy - y) < SAME_PLACE
+                });
+                near.unwrap_or_else(|| {
+                    first.push(i);
+                    first.len() - 1
+                })
+            })
+            .collect()
+    };
+    let mut keys: Vec<_> = groups.keys().copied().collect();
+    keys.sort_unstable();
+    for key in keys {
+        let members = &groups[&key];
+        let cl = clusters(members);
+        if cl.iter().all(|&c| c == 0) {
+            continue;
+        }
+        // the levels below the region, per member; then the first choice of
+        // levels that tells the places apart, or the one that comes closest
+        let below: Vec<Vec<Option<&str>>> = members
+            .iter()
+            .map(|&i| {
+                let (name, x, y) = &items[i];
+                look[1..]
+                    .iter()
+                    .map(|lk| lk.at(*x, *y).filter(|n| *n != &**name && Some(*n) != region[i]))
+                    .collect()
+            })
+            .collect();
+        let clashes = |levels: &[usize]| -> usize {
+            let mut seen: HashMap<Vec<Option<&str>>, usize> = HashMap::new();
+            let mut n = 0;
+            for (k, b) in below.iter().enumerate() {
+                let label: Vec<Option<&str>> = levels.iter().map(|&l| b[l]).collect();
+                if label.iter().all(|l| l.is_none()) {
+                    n += 1;
+                    continue;
+                }
+                n += (*seen.entry(label).or_insert(cl[k]) != cl[k]) as usize;
+            }
+            n
+        };
+        // indices into ADMIN_LEVELS[1..] = [5, 6, 7, 8]
+        const CHOICES: [&[usize]; 8] = [&[1], &[2], &[3], &[0], &[1, 3], &[2, 3], &[0, 3], &[1, 2]];
+        let best = CHOICES.iter().min_by_key(|c| clashes(c)).unwrap();
+        for (k, &i) in members.iter().enumerate() {
+            for &l in best.iter() {
+                if let Some(n) = below[k][l] {
+                    if extra[i].last() != Some(&n) {
+                        extra[i].push(n);
+                    }
+                }
+            }
+        }
+    }
+    Ok(items
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _, _))| {
+            let parts: Vec<&str> = region[i].into_iter().chain(extra[i].iter().copied()).collect();
+            if name.ends_with(')') || parts.is_empty() {
+                name.clone()
+            } else {
+                format!("{} ({})", name, parts.join(", ")).into()
+            }
+        })
+        .collect())
+}
 
 /// The coordinates of a place node, as a hashable key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1084,6 +1251,11 @@ fn d_record(cell: (i64, i64), pcs: &mut [DPiece]) -> Vec<u8> {
 /// The search keys of a place name: every word and every multi-word part.
 pub fn keys(name: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    // the region in parentheses at the end is shown, not searched
+    let name = match name.rfind(" (") {
+        Some(i) if name.ends_with(')') => &name[..i],
+        _ => name,
+    };
     for comp in name.split(", ") {
         let f = ta_index::fold(comp).replace('\'', "").replace('\u{2019}', "");
         let cleaned: String = f
@@ -1298,7 +1470,41 @@ pub fn build(
     let grp = merge_streets(&pieces, assign_places(&pieces, &hn, &places), &|s| {
         log(&since(s.to_string()))
     });
-    log(&since("places assigned".to_string()));
+    // every (name, point) a place is shown under: the place node, or for an
+    // alternative without one (a postal town far from it) the 4x4 cell of the
+    // street, so that one street keeps one name
+    let point = |a: &Alt, p: &Piece| {
+        let ac = (p.cell.0.div_euclid(8), p.cell.1.div_euclid(8));
+        a.anchor.map(|a| a.xy()).unwrap_or(((ac.0 as f64 + 0.5) * ACELL, (ac.1 as f64 + 0.5) * ACELL))
+    };
+    let mut item_of: HashMap<(Box<str>, u64, u64), usize> = HashMap::new();
+    let mut items: Vec<(Box<str>, f64, f64)> = Vec::new();
+    let mut item = |name: &Box<str>, (x, y): (f64, f64)| -> usize {
+        *item_of.entry((name.clone(), x.to_bits(), y.to_bits())).or_insert_with(|| {
+            items.push((name.clone(), x, y));
+            items.len() - 1
+        })
+    };
+    let alt_items: Vec<Vec<usize>> =
+        grp.iter().zip(&pieces).map(|(alts, p)| alts.iter().map(|a| item(&a.name, point(a, p))).collect()).collect();
+    let place_items: Vec<usize> = places
+        .iter()
+        .map(|pl| item(&pl.tags.name.clone().unwrap_or_default(), (pl.x, pl.y)))
+        .collect();
+    let named = place_names(&items, &ad.regions)?;
+    let n_regions = ad.regions.iter().filter(|r| r.level == crate::addr::ADMIN_LEVELS[0]).count();
+    let grp: Vec<Alts> = grp
+        .into_iter()
+        .zip(&alt_items)
+        .map(|(alts, ix)| {
+            alts.into_iter().zip(ix).map(|(a, &i)| Alt { name: named[i].clone(), anchor: a.anchor }).collect()
+        })
+        .collect();
+    log(&since(format!(
+        "places assigned: {} regions, {} areas below them",
+        n_regions,
+        ad.regions.len() - n_regions
+    )));
 
     // A: the place groups of each 4x4 cell
     let mut acells: Ordered<(i64, i64), Ordered<Alts, Vec<Box<str>>>> = Ordered::default();
@@ -1445,8 +1651,8 @@ pub fn build(
         .iter()
         .filter_map(|((n, a), _)| a.map(|a| (n.clone(), a)))
         .collect();
-    for pl in &places {
-        let name: Box<str> = pl.tags.name.clone().unwrap_or_default();
+    for (pl, &ix) in places.iter().zip(&place_items) {
+        let name = named[ix].clone();
         let key = (name.clone(), Anchor::of(pl.x, pl.y));
         if used.contains(&key) {
             continue;

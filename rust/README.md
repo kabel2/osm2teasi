@@ -72,6 +72,7 @@ identical position get the same class, name and flags.
 | `teasi md5s <map>` | `area cx cy md5` per record — to compare two charts |
 | `teasi dump <map> <dir>` | the decrypted records as individual files |
 | `teasi index <ta map>` | take the search index apart and rebuild it byte-identically |
+| `teasi find <ta map> <text> [--all]` | what the address search offers for that text: the hits under its key, with type, position and cells |
 | `teasi addr <file.osm.pbf> [out]` | addresses, places and interpolation ways from OSM |
 | `teasi poi <file.osm.pbf> <out>` | POI candidates as a canonical dump |
 | `teasi osmpoi <pbf> <poly> <map> [date]` | build the osmpoi layer (`--country=N`) |

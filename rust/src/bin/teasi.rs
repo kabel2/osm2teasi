@@ -369,6 +369,38 @@ fn index(path: &str) -> Result<bool> {
     Ok(ok)
 }
 
+/// What the place search offers for `text`: the hits at the end of its key
+/// path in the search index, as the firmware walks it.
+fn find(path: &str, text: &str, every: bool) -> Result<()> {
+    use teasi::ta_index::{fold, Node};
+    let idx = teasi::ta_index::parse(&teasi::ta_index::extract(&Chart::open(path)?)?)?;
+    let key = fold(text);
+    let mut node: &Node = &idx.root;
+    for ch in key.encode_utf16() {
+        match node.kids.iter().find(|k| k.ch == ch) {
+            Some(k) => node = &k.node,
+            None => {
+                println!("no key {:?}", key);
+                return Ok(());
+            }
+        }
+    }
+    fn all<'a>(n: &'a Node, out: &mut Vec<&'a teasi::ta_index::Res>) {
+        out.extend(n.res.iter());
+        for k in &n.kids {
+            all(&k.node, out);
+        }
+    }
+    let mut hits = Vec::new();
+    all(node, &mut hits);
+    println!("key {:?}: {} hits here, {} below", key, node.res.len(), hits.len());
+    for r in hits.iter().take(if every { usize::MAX } else { 40 }) {
+        println!("  type {} {:<50} {:.5} {:.5}  {} cells{}", r.typ, idx.text(r), r.lat, r.lon, r.cells.len(),
+                 if r.typ == 1 { format!(", {} streets", r.cells.iter().map(|c| c.offs.len()).sum::<usize>()) } else { String::new() });
+    }
+    Ok(())
+}
+
 /// Clean a tag value for the canonical dump (both sides do the same).
 fn flat<S: AsRef<str>>(s: Option<&S>) -> String {
     s.map(|v| v.as_ref().replace(['\t', '\n', '\r'], " "))
@@ -1028,6 +1060,13 @@ fn run() -> Result<bool> {
                 bail!("usage: teasi roundtrip <chart> [out]");
             }
             roundtrip(&args[1], args.get(2).map(|s| s.as_str()))
+        }
+        "find" => {
+            if args.len() < 3 {
+                bail!("usage: teasi find <ta map> <text>  (--all: every hit, not just 40)");
+            }
+            find(&args[1], &args[2..].join(" "), opt("all").is_some())?;
+            Ok(true)
         }
         "index" => {
             let mut ok = true;

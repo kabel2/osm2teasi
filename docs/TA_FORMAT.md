@@ -199,8 +199,8 @@ teasi ta --country=17 "--name=United Kingdom" osm_ref/great-britain-latest.osm.p
     osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919
 ```
 
-One command from the extract to the chart file: 2:24 and 4.7 GB for Great Britain, 7:40 and
-11.0 GB for Germany, 25 s for Denmark. It needs libgeos and reads the PBF twice, because it
+One command from the extract to the chart file: 2:24 and 4.7 GB for Great Britain, 10:45 and
+12.0 GB for Germany, 38 s for Denmark. It needs libgeos and reads the PBF twice, because it
 needs both the addresses and the streets.
 
 - `addr.rs` reads every address (`addr:housenumber` with `addr:street`), the interpolation
@@ -228,14 +228,29 @@ needs both the addresses and the streets.
    (suburb/quarter/neighbourhood, 2.5 / 1.5 / 0.8 km). On top come up to 3 `addr:city`
    values of the street within the 4×4 cell (post towns). Pieces of the same name whose ends
    are less than 60 m apart form one street, and that street gets a shared group (filters
-   below). The group string: `town, district|town|post town|…`. The firmware chains streets
+   below). The group string: `town, district|town|post town|…`. Every alternative gets the
+   **region** in parentheses, as in the originals: the `admin_level=4` boundary its place
+   node lies in (`Borken (Nordrhein-Westfalen)`; a post town without a place node takes the
+   region of its 4×4 cell). Without it, the five German places called Borken were five
+   identical hits, and the one in Westphalia could not be picked. Places of the same name
+   and region more than 5 km apart also get the levels below the region that tell them
+   apart (admin levels 5–8; per name the first of 6, 7, 8, 5, 6+8, 7+8, 5+8, 6+7 that
+   separates them, or the one that comes closest): `Berg (Bayern, Landkreis Bad
+   Tölz-Wolfratshausen, Eurasburg)`, `Ejby (Region Sjælland, Køge Kommune)`. In Germany
+   that takes the names occurring more than once in a state from 7273 to 108 (2026-10-09;
+   the rest are names that already end in parentheses, such as `Frankfurt (Oder)`, which
+   stay as they are). A boundary cut by the edge of the extract is left out. Germany: 12,517
+   boundaries, 645 s and 12.0 GB instead of 510 s and 11.5 GB. The firmware chains streets
    of the same name across several cells and tries them in turn (the chain at
    `+0x108`/`+0x114` in `FUN_00165a0c`).
 4. **Index:**
    - Type 0: one hit per name and place node, with the cells it appears in.
    - Type 2: the remaining places (locality, isolated_dwelling, farm and island too).
-   - Type 1: British postcode districts (the outward code, `SW1A` for instance) with their
-     streets.
+   - Type 1: postcodes with their streets, from `addr:postcode`: the outward code of a
+     British postcode (`SW1A`), otherwise the code up to the first space (`46325`, `1234`
+     of the Dutch `1234 AB`). Up to 2026-10-09 only the British ones were built, so a
+     German postcode found nothing (the original has `46325` with 983 streets).
+   - Keys leave out the region in parentheses, as in the originals.
    - Names are stored inline (no word pool), every language mask full, the language list as
      in DK.
 
