@@ -183,9 +183,13 @@ device-bound:  MAC == MD5(salt ‖ SECRET ‖ file[0x44:0x444] ‖ file[-0x400:]
 - If a file is signed **generically**, `FUN_001061bc` binds it to the device itself on first
   opening: it generates a new random salt and rewrites the MAC with the serial number. Every
   compiler here takes `--generic` for that (`chart::Signer`), and signs for `TEASI_DEVICE`
-  without it. Note what the generic variant does **not** change: the record key still comes
-  from the first eight digits of the serial (section 4), so such a file is readable on every
-  device whose serial carries one of the 19 known prefixes and on no other.
+  without it. Confirmed on the device (2026-10-08) with a generically signed
+  `GreatBritain_osmpoi`: after loading it, exactly the 64 bytes from 0x04 to 0x44 had
+  changed — salt and MAC — `teasi info` reported the file as device-bound, and its
+  `packages.xml` checksum was still the same.
+- What the generic variant does **not** change is the record key: it comes from the first
+  eight digits of the serial (section 4), so such a file is readable on every device whose
+  serial carries one of the 19 known prefixes and on no other.
 - Because the MAC covers the first and the last kilobyte of the file, it has to be
   recomputed **after** every change.
 
@@ -425,7 +429,8 @@ replacing a file that is listed there does. Two cases are untested: an entry who
 been renamed away, and two files for the same country in `Countries` at once.
 
 **Passing a map on to someone else** needs `--generic` (section 2), because a file signed for
-one serial does not open on another device. The checksum above survives the firmware's
+one serial does not open on another device. The recipient copies the file in and the device
+signs it for itself; nothing else is needed. The checksum above survives the firmware's
 rebinding, since it starts at 0x44, behind salt and MAC — but it is computed over the
 *encrypted* payload, and each build draws a fresh record key per tile, so two builds of the
 same data have different checksums. Whoever builds the file has to publish its size and MD5

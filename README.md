@@ -92,8 +92,8 @@ export TEASI_DEVICE=2013021200000368   # your own 16-digit serial
 Only the **first eight digits** pick the key — they are the production date of a batch, and
 the 19 batches listed in `chart.rs` all share one built-in key. Every compiler also takes
 `--generic`, which leaves the serial out of the header checksum; the firmware then binds
-such a file to the first device that opens it (`FUN_001061bc`, read from the firmware and
-not yet confirmed on a device). A map built that way should therefore run on any device
+such a file to the first device that opens it, rewriting 64 bytes and nothing else
+(`FUN_001061bc`, confirmed on a device 2026-10-08). A map built that way runs on any device
 whose serial starts with one of those prefixes, which is what makes it worth passing on.
 
 `BikeNav/packages.xml` lists size and MD5 for every map file it knows. If they do not
