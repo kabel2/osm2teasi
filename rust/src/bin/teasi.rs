@@ -43,6 +43,17 @@ usage: teasi <command> [arguments]
   ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]
                              compile the address search incl. its search index
                              (--country=N, --name=<country>; needs libgeos)
+  all <file.osm.pbf> <area.poly> <out dir> [YYYYMMDD]
+                             the elevation grid and all six layer files of one
+                             country in one run, named like the originals:
+                             --country=<name|code> picks the country (a name
+                             from the firmware's list, see chart.rs), --only=
+                             a subset of the layers, --land= the sea and the
+                             map images, --tiles= where the DEM tiles are
+                             cached (default <out dir>/dem_tiles),
+                             --original=<chart> an original file of that
+                             country, which supplies the sea outside the
+                             boundary and any tiles the extract does not cover
   dem <area.poly> <tile dir> <out.bin>
                              download the Copernicus DEM GLO-90 for that area
                              and write the elevation grid --heights= reads
@@ -798,6 +809,144 @@ fn compile_terrain(
     Ok(true)
 }
 
+/// The six layers of a map, in the order `all` builds them.
+const LAYERS: [&str; 6] = ["osmpoi", "osmpoint", "osmarea", "osm", "ta", "terrain"];
+
+/// Build a whole country: the elevation grid and all six layer files, named
+/// like the originals, into one directory.
+#[allow(clippy::too_many_arguments)]
+fn compile_all(
+    args: &[String],
+    cname: &str,
+    name: Option<&str>,
+    land: Option<&str>,
+    tiles: Option<&str>,
+    only: Option<&str>,
+    prefix: Option<&str>,
+    orig: Option<&str>,
+    rate: f32,
+    sigma: f64,
+    sign: &chart::Signer,
+) -> Result<bool> {
+    if args.len() < 3 {
+        bail!(
+            "usage: teasi all <file.osm.pbf> <area.poly> <out dir> [YYYYMMDD] \
+             --country=<name|code> [--name=<country>] [--prefix=<FileName>] \
+             [--land=<land_polygons.shp>] [--tiles=<dem dir>] [--only=osm,ta] \
+             [--original=<chart>]"
+        );
+    }
+    let (src, area, dir) = (&args[0], &args[1], &args[2]);
+    let date = match args.get(3) {
+        Some(d) => d.clone(),
+        None => chart::today(),
+    };
+    let (country, known, file) = chart::country(cname)?;
+    let name = match name.or(known) {
+        Some(n) => n.to_string(),
+        None => bail!("--country={} is not in the list, so --name=<country> is needed", country),
+    };
+    let prefix = match prefix.or(file) {
+        Some(p) => p.to_string(),
+        None => name.replace(' ', ""),
+    };
+    let want: Vec<&str> = match only {
+        Some(l) => {
+            let sel: Vec<&str> = l.split(',').map(str::trim).collect();
+            for s in &sel {
+                if !LAYERS.contains(s) {
+                    bail!("--only: unknown layer {:?}; one of {}", s, LAYERS.join(", "));
+                }
+            }
+            LAYERS.iter().filter(|l| sel.contains(*l)).copied().collect()
+        }
+        None => LAYERS.to_vec(),
+    };
+    // fail before the first half hour of work, not after it
+    if want.iter().any(|l| ["osmarea", "osm", "ta"].contains(l))
+        || (want.contains(&"terrain") && land.is_some())
+    {
+        teasi::geos::available()?;
+    }
+    if want.contains(&"osmarea") && land.is_none() && orig.is_none() {
+        println!("  note: without --land= or --original= the areas get no sea");
+    }
+    std::fs::create_dir_all(dir)?;
+    let tdir = match tiles {
+        Some(t) => t.to_string(),
+        None => format!("{}/dem_tiles", dir),
+    };
+    let grid = format!("{}/dem.bin", dir);
+    let out = |layer: &str| format!("{}/{}_{}.v{}", dir, prefix, layer, date);
+
+    println!(
+        "{} (country {}), {} -> {}, {}",
+        name,
+        country,
+        date,
+        dir,
+        if sign.bind { "signed for this device" } else { "signed generically" }
+    );
+    // only the ascents of the street layer and the terrain layer need heights
+    let heights = want.iter().any(|l| ["osm", "terrain"].contains(l));
+    let t0 = std::time::Instant::now();
+    let steps = want.len() + usize::from(heights);
+    let step = |n: usize, what: &str| println!("\n[{}/{}] {}", n, steps, what);
+
+    if heights {
+        step(1, "elevation grid");
+        dem(&[area.clone(), tdir, grid.clone()], sigma)?;
+    }
+
+    for (i, layer) in want.iter().enumerate() {
+        step(i + 1 + usize::from(heights), layer);
+        let dst = out(layer);
+        let mut a: Vec<String> = vec![src.clone(), area.clone()];
+        match *layer {
+            "osmpoi" | "osmpoint" => {
+                a.extend([dst, date.clone()]);
+                compile_poi(layer, &a, country, sign)?;
+            }
+            "osmarea" => {
+                a.extend([orig.unwrap_or("-").to_string(), dst, date.clone()]);
+                compile_osmarea(&a, country, land, sign)?;
+            }
+            "osm" => {
+                a.extend([orig.unwrap_or("-").to_string(), dst, date.clone()]);
+                compile_osm(&a, country, &name, Some(&grid), sign)?;
+            }
+            "ta" => {
+                a.extend([dst, date.clone()]);
+                compile_ta(&a, country, &name, sign)?;
+            }
+            "terrain" => {
+                let a = vec![grid.clone(), area.clone(), dst, date.clone()];
+                compile_terrain(&a, country, rate, land, Some(src), None, sign)?;
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    println!("\n{} in {:.0} s:", name, t0.elapsed().as_secs_f32());
+    for layer in &want {
+        let d = std::fs::read(out(layer))?;
+        println!(
+            "  {}_{}.v{}  size {} md5 {:x}",
+            prefix,
+            layer,
+            date,
+            d.len(),
+            chart::package_md5(&d)
+        );
+    }
+    println!(
+        "\nCopy these into BikeNav/Map/Countries/ on the device.  They have no entry in\n\
+         packages.xml, so they are loaded without a checksum check and nothing there has to\n\
+         be touched (see docs/CHART_FILES.md 5.4)."
+    );
+    Ok(true)
+}
+
 fn run() -> Result<bool> {
     let all: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<String> = all.iter().filter(|a| !a.starts_with("--")).cloned().collect();
@@ -907,6 +1056,29 @@ fn run() -> Result<bool> {
                 None => 4,
             };
             compile_poi(&args[0], &args[1..], country, &sign)
+        }
+        "all" => {
+            let rate = match opt("rate") {
+                Some(v) => v.parse().context("--rate")?,
+                None => teasi::terrain::RATE,
+            };
+            let sigma = match opt("sigma") {
+                Some(v) => v.parse().context("--sigma")?,
+                None => teasi::dem::SIGMA,
+            };
+            compile_all(
+                &args[1..],
+                opt("country").unwrap_or("Denmark"),
+                opt("name"),
+                opt("land"),
+                opt("tiles"),
+                opt("only"),
+                opt("prefix"),
+                opt("original"),
+                rate,
+                sigma,
+                &sign,
+            )
         }
         "dem" => {
             let sigma = match opt("sigma") {

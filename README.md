@@ -41,42 +41,77 @@ ghidra_scripts/   headless scripts for analysing the firmware in Ghidra
 One binary, `teasi`, with a subcommand per job — [rust/README.md](rust/README.md) describes
 them all. No other runtime and no build step beyond `cargo build`.
 
-## Getting started
+## Building a map
+
+Everything in one command, for the country of your choice:
 
 ```bash
 cd rust && cargo build --release
+
+export TEASI_DEVICE=2013021200000368        # the serial of your own device
+
+./target/release/teasi all --country=Denmark \
+    --land=land-polygons-split-4326/land_polygons.shp \
+    denmark-latest.osm.pbf denmark.poly out/
 ```
 
-Look at an existing map and write out its records one by one:
+That builds the elevation grid and all six layer files, named the way the device expects
+them, and prints their size and MD5 at the end. Denmark takes about three and a half
+minutes, Great Britain about thirteen with a peak of 16 GB of memory — the street layer is
+the expensive part.
+
+What you need:
+
+- the **extract and the boundary** of your country from
+  [download.geofabrik.de](https://download.geofabrik.de): `<country>-latest.osm.pbf` and
+  the matching `<country>.poly`.
+- the **land polygons** from
+  [osmdata.openstreetmap.de](https://osmdata.openstreetmap.de/data/land-polygons.html)
+  (split, WGS84) for `--land=`. Without them the water areas have no coastline to end at
+  and the relief images get no land cover; everything else works.
+- **libgeos**, which is opened at run time, so `cargo build` does not need it — see
+  `rust/src/geos.rs`. Only `osmarea`, `osm`, `ta` and `terrain` use it.
+- the **elevation tiles**, which `teasi all` downloads itself from the public Copernicus
+  bucket (234 of them for Great Britain) and caches in `out/dem_tiles`.
+
+`--country=` takes a name from the firmware's list or a bare code, `--only=osm,ta` builds a
+subset, and `--original=<chart>` lets a map of the same country that is already on the
+device fill in the sea outside the boundary. `teasi all` without arguments lists the rest.
+
+### Onto the device
+
+Confirm the USB connection **on the display** first, otherwise the volume stays unreadable.
+Then copy the files in — nothing else to do:
+
+```bash
+cp out/Denmark_*.v* /run/media/$USER/TFAT/BikeNav/Map/Countries/
+```
+
+The device only loads countries that are unlocked for it, and only one file per layer and
+country: a file is skipped if one with the same or a newer **date** is already loaded. So
+either give your map a date newer than the one it replaces, or delete that file — an older
+date is silently ignored. Back up what is there before overwriting it.
+
+## Looking at an existing map
 
 ```bash
 ./target/release/teasi info <maps>/Denmark_osm.v20210916
 ./target/release/teasi dump <maps>/Denmark_osm.v20210916 out/osm
 ```
 
-Check that a file is rebuilt without loss — every record is taken apart and written again,
-and the result has to be byte-identical:
+`check` takes every record apart and writes it again; the result has to be byte-identical,
+which is the test that the format is understood rather than guessed:
 
 ```bash
 ./target/release/teasi check <maps>/Denmark_*.v2*
 ```
 
-Build a layer from OSM (POIs here; the other layers are in the layer documents):
+Single layers have their own subcommands, one per compiler, and each layer document has a
+section "Building it from OSM" with its commands, runtime and memory. `teasi dem` builds
+only the elevation grid:
 
 ```bash
-./target/release/teasi osmpoi osm_ref/great-britain-latest.osm.pbf \
-    osm_ref/great-britain.poly build/GreatBritain_osmpoi.v20260919 20260919 --country=17
-```
-
-`osmarea`, `osm`, `ta` and `terrain` need libgeos, which is opened at run time, so building
-`teasi` does not need it — see `rust/src/geos.rs`.
-
-The elevation data for `terrain` and for the ascents of the routing graph comes from the
-Copernicus DEM GLO-90; `teasi dem` downloads the 1°×1° tiles covering an area, decimates
-them onto one 3″ grid and smooths it:
-
-```bash
-./target/release/teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin
+./target/release/teasi dem great-britain.poly osm_ref/dem build/gb/dem.bin
 ```
 
 ### Device binding

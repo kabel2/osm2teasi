@@ -67,6 +67,52 @@ pub fn header_md5(d: &[u8], device: &[u8]) -> [u8; 16] {
     h.finalize().into()
 }
 
+/// The firmware's country list (UTF-16 strings in bikenav.exe, see
+/// docs/CHART_FILES.md 1): the header's country code at 0x54 is the index into
+/// it, and the third column is how the original files are named.  Denmark,
+/// Germany, Norway, Sweden and Great Britain are confirmed against the files on
+/// the device; the rest follow the list's order.
+pub const COUNTRIES: [(&str, u32, &str); 17] = [
+    ("Andorra", 1, "Andorra"),
+    ("Austria", 2, "Austria"),
+    ("Belgium", 3, "Belgium"),
+    ("Denmark", 4, "Denmark"),
+    ("Finland", 5, "Finland"),
+    ("France", 6, "France"),
+    ("Germany", 7, "Germany"),
+    ("Ireland", 8, "Ireland"),
+    ("Italy", 9, "Italy"),
+    ("Luxembourg", 10, "Luxembourg"),
+    ("Netherlands", 11, "Netherlands"),
+    ("Norway", 12, "Norway"),
+    ("Portugal", 13, "Portugal"),
+    ("San Marino", 14, "SanMarino"),
+    ("Spain", 15, "Spain"),
+    ("Sweden", 16, "Sweden"),
+    ("United Kingdom", 17, "GreatBritain"),
+];
+
+/// One country of `COUNTRIES`, by name (spaces and case ignored) or by code.
+/// An unknown code is passed through, because only the device's unlock table
+/// decides which ones it loads -- the name then has to be given separately.
+pub fn country(s: &str) -> Result<(u32, Option<&'static str>, Option<&'static str>)> {
+    let norm = |t: &str| t.to_lowercase().replace(['_', '-', ' '], "");
+    if let Some(&(name, code, file)) = COUNTRIES.iter().find(|(n, _, f)| {
+        norm(n) == norm(s) || norm(f) == norm(s)
+    }) {
+        return Ok((code, Some(name), Some(file)));
+    }
+    let code = s.parse().map_err(|_| {
+        anyhow::anyhow!("unknown country {:?}; one of {} or a code", s, names())
+    })?;
+    Ok((code, None, None))
+}
+
+/// The known country names, for an error message.
+pub fn names() -> String {
+    COUNTRIES.iter().map(|(n, _, _)| *n).collect::<Vec<_>>().join(", ")
+}
+
 /// Who a freshly built file is signed for.  The serial always picks the record
 /// key (`global_key`), `bind` decides what the header MAC covers:
 ///

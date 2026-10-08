@@ -14,6 +14,7 @@ and map images) and **the elevation grid** itself, from the Copernicus DEM.
 | Raw LZMA1 as in the originals | `lzma.rs` | `xz2`, see the pitfalls at the end |
 | Containers A, B, C, D, osmpoint | `layers.rs` | |
 | Writing files, device binding | `writer.rs` | `chart::Signer`, bound or `--generic` |
+| Country list and codes | `chart.rs` | `COUNTRIES`, 5 of 17 confirmed on the device |
 | Search index of the address search | `ta_index.rs` | |
 | Reading OSM PBF, node index | `pbf.rs` | the `osmpbf` crate, instead of pyosmium |
 | Addresses, places, interpolation ways | `addr.rs` | |
@@ -63,6 +64,7 @@ identical position get the same class, name and flags.
 
 | Command | Purpose |
 |---|---|
+| `teasi all <pbf> <poly> <dir> [date]` | the elevation grid and all six layers of one country (`--country=<name\|code>`, `--only=`, `--land=`, `--tiles=`, `--original=`, `--prefix=`) |
 | `teasi info <map>…` | header, tiles, record counts per slot area |
 | `teasi check <map>…` | take every record apart and rebuild it byte-identically |
 | `teasi roundtrip <map> [out]` | decrypt the whole file, write it again, compare the records |
@@ -81,6 +83,9 @@ identical position get the same class, name and flags.
 | `teasi ta <pbf> <poly> <map> [date]` | build the address search (`--country=N`, `--name=…`) |
 | `teasi dem <poly> <tile dir> <out.bin>` | download the Copernicus DEM for that area and write the elevation grid (`--sigma=S`) |
 | `teasi terrain <heights> <poly> <map> [date]` | build the elevation model and the map images (`--land=…`, `--area=…`, `--rate=R`, `--only=x,y`) |
+
+Every compiler signs the file for `TEASI_DEVICE`, or for no device in particular with
+`--generic` (`chart::Signer`); the firmware then binds it to the first device that opens it.
 
 The serial number comes from `TEASI_DEVICE`, the default being the one in `chart.rs`.
 

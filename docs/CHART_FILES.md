@@ -43,10 +43,11 @@ That is how the chart loader `FUN_003f282c` reads the header. The **country code
 index into the firmware's country list (UTF-16 strings in `bikenav.exe`: Andorra 1, Austria
 2, Belgium 3, Denmark 4, Finland 5, France 6, Germany 7, Ireland 8, Italy 9, Luxembourg 10,
 Netherlands 11, Norway 12, Portugal 13, San Marino 14, Spain 15, Sweden 16, United Kingdom
-17, …); DE 7 and NO 12 confirm it. Only countries with their byte set in the unlock table
-(`*DAT_003f3f64 + 0x324 + code`) are loaded; UK (17) runs on this device (2026-09-18). The
-fields `0x58`–`0x6C` are buffer sizes: per layer the firmware takes the maximum over every
-loaded file. Larger values than needed are harmless (osmpoi and osmpoint have more at `0x58`
+17, …, the table `COUNTRIES` in `rust/src/chart.rs`); the files on the device confirm
+Denmark 4, Germany 7, Norway 12, Sweden 16 and Great Britain 17. Only countries with their
+byte set in the unlock table (`*DAT_003f3f64 + 0x324 + code`) are loaded; UK (17) runs on
+this device (2026-09-18). The fields `0x58`–`0x6C` are buffer sizes: per layer the firmware
+takes the maximum over every loaded file. Larger values than needed are harmless (osmpoi and osmpoint have more at `0x58`
 than their largest record), smaller ones must not occur. The **date** decides which file
 counts: if a file with the same or a newer date is already loaded for that layer and country,
 the new one is skipped.
@@ -275,6 +276,7 @@ cd rust && cargo build --release        # ./target/release/teasi
 | `index <ta chart>` | the search index: parse, rebuild, compare |
 | `ways`, `addr`, `poi`, `area`, `land` | the OSM extractors, as canonical dumps (5.5) |
 | `dem <area.poly> <tile dir> <out.bin>` | the Copernicus elevation grid (5.5) |
+| `all` | the elevation grid and all six layers of one country in one run (5.6) |
 | `osmpoi`, `osmpoint`, `osmarea`, `osm`, `ta`, `terrain` | the six layer compilers (5.6) |
 
 `osmarea`, `osm`, `ta` and `terrain` need libgeos, opened at run time (`src/geos.rs`), so
@@ -481,7 +483,19 @@ teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin   # 234 tiles,
 | terrain | `teasi terrain` | elevation model (the elevation profile) and map images (a hillshade coloured by land cover), see [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md); the heights come from `teasi dem` |
 
 Every compiler takes `--country=N`; osm and osmarea also run without an original file (`-`),
-see 5.7.
+see 5.7. **`teasi all`** runs the whole set in one go and names the files the way the device
+expects them — the elevation grid first, then the layers of `--only=` or all six:
+
+```bash
+teasi all --country=Denmark --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
+    --tiles=osm_ref/dem_dk \
+    osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly build/all_test 20260918
+```
+
+Denmark is 201 s that way (grid 1 s, osmpoi 5, osmpoint 3, osmarea 52, osm 70, ta 52,
+terrain 18), and it prints every file's `packages.xml` size and MD5 at the end. `--country=`
+takes a name from `COUNTRIES` (section 1) or a bare code, and the country decides both the
+header's code and the file names. `--original=<chart>` is passed on to osm and osmarea.
 
 The procedure per layer: run the compiler on `denmark-220101` and compare object by object
 with the original file (calibrating the rules), then switch to `denmark-latest`. The file
