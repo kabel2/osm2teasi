@@ -26,6 +26,10 @@
 #   REGION_TIMEOUT    seconds one region may take before it is given up,
 #                     default 6 hours, far above any region that finishes
 #   DATE              version date of the files, default today
+#   ONLY              rebuild just these layers (comma separated, e.g. ONLY=ta)
+#                     in the zips that are already there: the other files are
+#                     kept, the README is written anew.  A zip whose layers
+#                     already carry DATE is skipped, so this resumes too.
 #
 # The region list is generated: `teasi regions > tools/regions.tsv` fetches
 # Geofabrik's index and maps it onto the firmware's country codes (see
@@ -41,6 +45,9 @@ max=${MAX_PBF_MB:-$(awk '/^MemTotal:/ { print int($2 / 1024 / 3) }' /proc/meminf
 date=${DATE:-$(date +%Y%m%d)}
 land=${LAND:-}
 base=https://download.geofabrik.de
+only=${ONLY:-}
+# the zip entries the rebuilt layers replace
+drop=(); for l in ${only//,/ }; do drop+=("*_$l.v*"); done
 
 [ -x "$teasi" ] || { echo "no teasi binary at $teasi -- cargo build --release first"; exit 1; }
 [ -r "$list" ] || { echo "no region list at $list"; exit 1; }
@@ -52,6 +59,15 @@ tiles=$out/dem_tiles
 report=$out/report.tsv
 mkdir -p "$work" "$tiles" || exit 1
 [ -s "$report" ] || printf 'region\tcountry\tstatus\tseconds\tbytes\n' > "$report"
+
+# ONLY mode: true when every rebuilt layer in the zip already has this date
+fresh() {
+    local l
+    for l in ${only//,/ }; do
+        unzip -Z1 "$1" | grep -q "_$l\.v" || continue
+        unzip -Z1 "$1" | grep -qx ".*_$l\.v$date" || return 1
+    done
+}
 
 # Continent -> folder name: australia-oceania becomes Australia-Oceania.
 folder() { echo "$1" | sed -e 's/\b\(.\)/\u\1/g'; }
@@ -65,7 +81,13 @@ while IFS=$'\t' read -r continent region code country prefix; do
     name=$(basename "$region")
     dir=$out/$(folder "$continent")
     zip=$dir/$name.zip
-    if [ -e "$zip" ]; then
+    if [ -n "$only" ]; then
+        # rebuilding layers needs the zip with the others
+        have=$([ ! -e "$zip" ] || fresh "$zip" && echo y)
+    else
+        have=$([ -e "$zip" ] && echo y)
+    fi
+    if [ -n "$have" ]; then
         skipped=$((skipped + 1))
         continue
     fi
@@ -81,7 +103,7 @@ while IFS=$'\t' read -r continent region code country prefix; do
 
     size=$(curl -sIL --max-time 120 "$base/$region-latest.osm.pbf" 2>/dev/null |
            tr -d '\r' | awk 'tolower($1) == "content-length:" { v = $2 } END { print v }')
-    if [ -n "${size:-}" ] && [ "$size" -gt $((max * 1024 * 1024)) ]; then
+    if [ -z "$only" ] && [ -n "${size:-}" ] && [ "$size" -gt $((max * 1024 * 1024)) ]; then
         echo "    $((size / 1024 / 1024)) MB extract, over MAX_PBF_MB=$max -- left out"
         printf '%s\t%s\ttoo-big-%sMB\t0\t0\n' "$region" "$country" "$((size / 1024 / 1024))" >> "$report"
         failed=$((failed + 1))
@@ -97,8 +119,9 @@ while IFS=$'\t' read -r continent region code country prefix; do
 
     rm -rf "$stage"
     if ! timeout "${REGION_TIMEOUT:-21600}" "$teasi" all --generic --country="$code" --tiles="$tiles" \
-            ${land:+--land="$land"} "$pbf" "$poly" "$stage" "$date" \
-            > "$work/$name.log" 2>&1; then
+            ${land:+--land="$land"} ${only:+--only="$only"} "$pbf" "$poly" "$stage" "$date" \
+            > "$work/$name.log" 2>&1 ||
+       { [ -n "$only" ] && ! unzip -q "$zip" -x README.txt "${drop[@]}" -d "$stage"; }; then
         echo "    build failed, see $work/$name.log"
         tail -n3 "$work/$name.log" | sed 's/^/      /'
         printf '%s\t%s\tbuild-failed\t%s\t0\n' "$region" "$country" "$((SECONDS - t0))" >> "$report"
@@ -107,10 +130,11 @@ while IFS=$'\t' read -r continent region code country prefix; do
     rm -f "$pbf" "$poly" "$stage/dem.bin"
 
     # one README per zip, so a stranger needs nothing but the zip
+    dates=$(cd "$stage" && ls *.v* | sed 's/.*\.v//' | sort -u | paste -sd/)
     {
-        echo "Teasi map: $country ($region, OpenStreetMap of $date)"
+        echo "Teasi map: $country ($region, OpenStreetMap of $dates)"
         echo
-        echo "Copy every *.v$date file into BikeNav/Map/Countries/ on the device."
+        echo "Copy every *.v* file into BikeNav/Map/Countries/ on the device."
         echo "Confirm the USB connection on the display first, or the volume stays"
         echo "unreadable.  BikeNav/packages.xml only matters when this replaces one of"
         echo "the original maps (Denmark, Germany, Norway, Sweden): their entries still"
