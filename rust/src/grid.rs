@@ -134,7 +134,9 @@ impl Grid {
     /// (`cKDTree.query_pairs`), in ascending order.
     pub fn pairs(&self, r: f64) -> Vec<(u32, u32)> {
         let mut out = Vec::new();
-        let reach = (r / self.size).ceil() as i64 + 1;
+        // beyond the grid the rings are empty; without the cap a group whose
+        // points all coincide (size 1e-9) would walk billions of them
+        let reach = ((r / self.size).ceil() as i64 + 1).min(self.nx.max(self.ny));
         let r2 = r * r;
         for i in 0..self.pts.len() {
             let q = self.pts[i];

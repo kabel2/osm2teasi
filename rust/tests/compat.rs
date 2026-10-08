@@ -1174,3 +1174,24 @@ fn regions_split_countries_the_firmware_knows_by_part() {
         ]
     );
 }
+
+#[test]
+fn grid_pairs_with_coincident_points() {
+    // all ends of a street on one point (Ohio): the grid shrinks to 1e-9 and
+    // pairs() must still stop at its edge
+    let g = teasi::grid::Grid::new(&[(5.0, 7.0); 4]);
+    assert_eq!(g.pairs(30.0), vec![(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]);
+    // and agree with every pair checked by hand elsewhere
+    let mut r = Lcg(4242);
+    let pts: Vec<(f64, f64)> = (0..300).map(|_| (r.next() * 100.0, r.next() * 3.0)).collect();
+    let mut want = Vec::new();
+    for i in 0..pts.len() {
+        for j in i + 1..pts.len() {
+            let (dx, dy) = (pts[j].0 - pts[i].0, pts[j].1 - pts[i].1);
+            if dx * dx + dy * dy <= 2.5 * 2.5 {
+                want.push((i as u32, j as u32));
+            }
+        }
+    }
+    assert_eq!(teasi::grid::Grid::new(&pts).pairs(2.5), want);
+}
