@@ -7,7 +7,9 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1"
+jpeg-encoder = "0.7"
 md-5 = "0.10"
+openjpeg-sys = "1"
 osmpbf = "0.3.8"
 rayon = "1"
 unicode-normalization = "0.1"

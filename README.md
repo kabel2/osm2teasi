@@ -36,7 +36,7 @@ Jedes Format hat ein eigenes Dokument in [docs/](docs/), jeweils mit einem Absch
 ```
 tools/            Die Werkzeugkette: Hülle lesen/schreiben, Extraktoren, Compiler
 docs/             Formatdokumentation (deutsch), Einstieg: KARTEN_ENTSCHLUESSELUNG.md
-rust/             Rust-Portierung: Hülle, OSM lesen, alle fünf OSM-Layer
+rust/             Rust-Portierung: Hülle, OSM lesen, alle sechs Layer-Compiler
 ghidra_scripts/   Headless-Skripte für die Firmware-Analyse in Ghidra
 attic/            Einmal-Skripte aus der Analysephase, nicht gepflegt
 ```
@@ -102,10 +102,10 @@ Damit das Gerät eine neu gebaute Datei ohne Warnung annimmt, müssen Größe un
 
 In [rust/](rust/) wird die Werkzeugkette nach Rust portiert. Fertig sind die Hülle
 (PC1, Prüfsumme, rohes LZMA1, alle Record-Container, Schreiber, Suchindex), das Lesen
-von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und alle fünf OSM-Layer-Compiler
-(`osmpoi`, `osmpoint`, `osmarea`, `osm` und `ta`, vom Extrakt direkt in die
-Kartendatei). Die
-Python-Werkzeuge bleiben die Referenz; geprüft wird gegen sie:
+von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und alle sechs Layer-Compiler
+(`osmpoi`, `osmpoint`, `osmarea`, `osm`, `ta` und `terrain`, vom PBF direkt in die
+Kartendatei). Nur die Höhenquellen (`osm_heights.py`, `dem_heights.py`) bleiben in
+Python. Die Python-Werkzeuge bleiben die Referenz; geprüft wird gegen sie:
 
 ```bash
 cd rust && cargo build --release

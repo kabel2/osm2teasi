@@ -2,14 +2,14 @@
 
 Portierung der Werkzeugkette nach Rust. Fertig sind **die Hülle** (Stufe 1:
 Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex),
-**das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion) und
-**alle fünf OSM-Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint`, `osmarea`, `osm` und
-`ta`, aus dem PBF direkt in die Kartendatei). Die Python-Werkzeuge in
-[../tools/](../tools/) bleiben die Referenz; was hier steht, muss dasselbe liefern.
+**das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion), **alle fünf
+OSM-Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint`, `osmarea`, `osm` und `ta`, aus dem
+PBF direkt in die Kartendatei) und **der Layer `terrain`** (Stufe 4: Höhenmodell und
+Kartenbilder). Die Python-Werkzeuge in [../tools/](../tools/) bleiben die Referenz; was
+hier steht, muss dasselbe liefern.
 
-Noch nicht portiert: `compile_terrain.py` (Stufe 4, offene JPEG-2000-Frage) und die
-Höhenquellen selbst (`osm_heights.py`, `dem_heights.py` — ihre Ergebnisse liest Rust,
-s. u.).
+Nur die Höhenquellen selbst bleiben in Python (`osm_heights.py` mit scipys `lsqr`,
+`dem_heights.py` mit dem Copernicus-Modell); ihre Ergebnisse liest Rust, s. u.
 
 ## Stand
 
@@ -35,7 +35,8 @@ s. u.).
 | Layer `osm` bauen | `compile_osm.py` | `osm.rs` |
 | Nachbarsuche (statt scipys kd-Baum) | `scipy.spatial` | `grid.rs` |
 | Layer `ta` bauen (Adresssuche) | `compile_ta.py` | `ta.rs` |
-| Höhenmodell und Kartenbilder | `compile_terrain.py` | – |
+| Zeichnen, Skalieren, JPEG, JPEG 2000 | Pillow, OpenJPEG | `raster.rs` |
+| Layer `terrain` bauen | `compile_terrain.py` | `terrain.rs` |
 
 ## Bauen und prüfen
 
@@ -44,6 +45,10 @@ cargo build --release
 cargo test                 # Vergleichswerte aus den Python-Werkzeugen
 TEASI_GEOS=… cargo test    # dazu die zwei GEOS-Tests (sonst übersprungen, s. u.)
 ```
+
+Der Build braucht einen C-Compiler: `xz2` übersetzt liblzma mit, `openjpeg-sys`
+OpenJPEG (für die Höhenkacheln des terrain-Layers). libgeos dagegen wird **nicht**
+mitgebaut, sondern zur Laufzeit geladen, s. u.
 
 Der eigentliche Abnahmetest läuft gegen echte Karten (die nicht im Repo liegen):
 
@@ -74,6 +79,7 @@ osmpoint 110) in 1,3 s.
 | `teasi ways <datei.osm.pbf> <aus>` | Straßen- und Linien-Ways als kanonischer Dump |
 | `teasi osm <pbf> <poly> <original\|-> <karte> [datum]` | den osm-Layer bauen (`--country=N`, `--name=…`, `--heights=…`) |
 | `teasi ta <pbf> <poly> <karte> [datum]` | die Adresssuche bauen (`--country=N`, `--name=…`) |
+| `teasi terrain <höhen> <poly> <karte> [datum]` | Höhenmodell und Kartenbilder bauen (`--land=…`, `--area=…`, `--rate=R`, `--only=x,y`) |
 
 Die Seriennummer kommt wie bei den Python-Werkzeugen aus `TEASI_DEVICE`
 (Standard: die in `chart.rs`).
@@ -484,6 +490,105 @@ Ringe sich selbst berühren): Rust findet 2 Adressen mehr, davon macht eine aus 
 Bereich 111–147 den Bereich 111–149, und eine verschiebt den Mittelpunkt des Bezirks
 BN10 um 5 cm; die zwei anderen betroffenen Index-Treffer sind die beiden Ortsflächen,
 die schon dort um 27 m abweichen.
+
+## Stufe 4: der Layer terrain (Höhenmodell und Kartenbilder)
+
+`terrain.rs` baut die Typ-5-Datei: pro Region (1,40625°) 8×8 Zellen à 256×256 px, die
+Höhen als JPEG-2000-Kacheln und die Kartenbilder als JPEG, letztere zusätzlich als
+Pyramide 4×4, 2×2, 1×1. Die Höhen kommen aus `heights.rs` (dem Export von
+`dem_heights.py`), die Landbedeckung aus `area.rs`, das Meer aus `land.rs`.
+
+```bash
+# nur das Höhenprofil, wie Region (122,20) von Denmark_terrain
+./target/release/teasi terrain build/gb/dem.bin osm_ref/great-britain.poly out 20260919
+
+# mit Kartenbildern (braucht libgeos, s. o.)
+./target/release/teasi terrain --country=17 \
+    --land=land-polygons-split-4326/land_polygons.shp \
+    --area=osm_ref/great-britain-latest.osm.pbf \
+    build/gb/dem.bin osm_ref/great-britain.poly out 20260919    # 1:24, 7,9 GB
+```
+
+### Die Teile von Pillow
+
+Fünf Stellen des Python-Compilers stecken in Bibliotheken, nicht in seinem Code. Drei
+sind in `raster.rs` nachgebaut, Zeile für Zeile aus den C-Quellen, samt Float-Breiten
+und Rundungsmakros; zwei bleiben Bibliotheken:
+
+| Python | Rust | gleich? |
+|---|---|---|
+| `ImageDraw.polygon` (`Draw.c: polygon_generic`) | `Mask::polygon` | bitgleich |
+| `Image.resize(…, LANCZOS)` (`Resample.c`) | `raster::resize` | bitgleich |
+| `np.gradient` für die Schattierung | `terrain::shade` | bitgleich |
+| `save("JPEG2000", …)`, OpenJPEG | `raster::jp2`, `openjpeg-sys` | bis auf ein Byte |
+| `save("JPEG", …)`, libjpeg-turbo | `raster::jpeg`, `jpeg-encoder` | nein |
+
+Beim Polygonfüller zählt jede Kleinigkeit: die Koordinaten werden wie in C **nach null
+abgeschnitten** (nicht gerundet), eine Kante liefert ihr `x` ein **zweites Mal**, wenn
+die Scanlinie ihr `ymax` trifft und nicht die letzte Zeile ist (sonst zählt ein
+durchlaufender Eckpunkt doppelt und die Zeile kippt), waagerechte Kanten werden direkt
+gemalt statt geschnitten, und gefüllt wird von `floor(x+0.5)` bis `ceil(x-0.5)`. Mit
+„sinnvoll geraten" statt dem Original wichen 80 % der Polygone ab; mit dem Original
+keines von 5000 (`polygon_fill_matches_pil`).
+
+Das Skalieren rechnet wie Pillow in Festkomma: die Lanczos-Koeffizienten werden mit 2²²
+multipliziert und von null weg zu `i32` gerundet, der Akkumulator startet bei 2²¹ und
+wird am Ende um 22 Bit geschoben. Die waagerechte Richtung läuft zuerst, und nur über
+die Zeilen, die die senkrechte überhaupt liest.
+
+### JPEG 2000 und JPEG
+
+Für die Höhenkacheln ist dieselbe Bibliothek nötig, die Pillow benutzt: ein reiner
+Rust-Encoder würde andere Bytes liefern (wie die Rate über die Codeblöcke verteilt wird,
+ist Implementierungssache), und was der Decoder im Gerät annimmt, ist nicht dokumentiert.
+`openjpeg-sys` kompiliert OpenJPEG 2.5.3 ins Programm; die Parameter sind die von Pillows
+Plugin (`irreversible`, 6 Auflösungen, Codeblöcke 64×64, LRCP, eine Schicht,
+Verhältnis 50). Das Ergebnis ist **byteidentisch** bis auf ein Byte: OpenJPEG schreibt
+seine eigene Version in den COM-Marker, und Pillow bringt 2.5.4 mit. Das bleibt so —
+eine falsche Versionsangabe in die Datei zu schreiben wäre schlechter als ein Byte
+Unterschied, und `scripts/terrain_compare.py` blendet es aus.
+
+Die Kartenbilder gehen durch `jpeg-encoder` (reines Rust) statt libjpeg-turbo: Baseline,
+4:2:0, Standard-Huffman-Tabellen, IJG-Quantisierung zu Qualität 80, JFIF mit 96 dpi und
+das EXIF-APP1 der Originale. Die Bytes sind andere — die Segmente stehen in anderer
+Reihenfolge, und die Chroma-Unterabtastung mittelt blockweise, während libjpeg
+dreieckig filtert. Für Bilder, die ohnehin verlustbehaftet sind und über die die Datei
+keine Prüfsumme führt, ist das in Kauf genommen.
+
+### Geprüft gegen Python
+
+`scripts/terrain_compare.py` vergleicht zwei Kartendateien Region für Region — Tabellen,
+Höhenkacheln byteweise, Kartenbilder als Pixel. `teasi check` kann das nicht, der Layer
+hat keine Slot-Bereiche.
+
+| | Regionen | Höhenkacheln | Kartenbilder |
+|---|---|---|---|
+| Dänemark | 28 von 28 | **1034 von 1034** | 516 von 2029 pixelgleich |
+| Großbritannien | 85 von 85 | **1999 von 1999** | 2680 von 5391 pixelgleich |
+
+Die Höhenkacheln sind bis auf das Versionsbyte identisch, `a0` und `a1` eingeschlossen;
+keine einzige weicht im Codestream ab. Bei den Kartenbildern ist die mittlere Abweichung
+0,025 von 255 und der Median der größten Abweichung je Bild **1**; im schlimmsten Bild
+95, als Ringen um einzelne Pixel in dicht gezeichneten Gegenden. Dass die Hälfte der
+Bilder pixelgleich durchläuft — und zwar genauso detaillierte wie die abweichenden —
+zeigt, dass die Quellbilder übereinstimmen und nur der Encoder anders ist. Die Dateien
+sind 36.886.754 statt 36.887.738 B groß, drei Hunderttausendstel kleiner.
+
+| | Python (nur der Compiler) | Rust (PBF und Shapefile → Kartendatei) |
+|---|---:|---:|
+| Dänemark (28 Regionen) | 10 s | 17 s, 1,7 GB — davon 7 s Regionen |
+| Großbritannien (85 Regionen) | ~2 min, 10 GB | 1:24, 7,9 GB |
+
+Die beiden Spalten messen nicht dasselbe: Python bekommt drei fertige Pickles
+vorgesetzt (`dem_heights.py`, `land_extract.py`, `osm_area_extract.py` — für
+Großbritannien über 20 min), Rust liest das 2,2-GB-PBF und das 1,3-GB-Shapefile in
+seinen Zeiten selbst. Die Regionen allein sind in Rust etwa so schnell wie in Python,
+weil dort die Arbeit schon in C steckt und auf alle Kerne verteilt ist.
+
+Eine Kleinigkeit weicht vor dem Zeichnen ab: Rust bindet 525.037 statt 525.034
+Landbedeckungs-Flächen in die dänischen Regionen ein. Das sind dieselben 55 von 978.957
+Flächen, die der Extraktor schon beim osmarea-Layer anders zerlegt (Ringe, die sich
+selbst berühren); die Zahl der Bilder und Höhenkacheln ist in jeder Region dieselbe.
 
 ## Zwei Fallen
 

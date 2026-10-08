@@ -882,3 +882,74 @@ fn index_keys_match_python() {
     assert_eq!(teasi::ta::keys("SW1A"), ["sw1a"]);
     assert_eq!(teasi::ta::keys("\u{c5}rhus"), ["arhus"]);
 }
+
+/// A tiny generator both sides share, so that the shapes in the next test are
+/// the ones scripts/raster_ref.py drew with PIL.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> f64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+#[test]
+fn polygon_fill_matches_pil() {
+    use teasi::raster::Mask;
+    let mut r = Lcg(12345);
+    let mut h = Md5::new();
+    for _ in 0..200 {
+        let k = 3 + (r.next() * 7.0) as usize;
+        let pts: Vec<(f64, f64)> =
+            (0..k).map(|_| (-6.0 + r.next() * 44.0, -6.0 + r.next() * 44.0)).collect();
+        let mut m = Mask::new(32, 32, 0);
+        m.polygon(&pts, 1);
+        h.update(&m.px);
+    }
+    assert_eq!(format!("{:x}", h.finalize()), "376aa0b5f07a32f40bcc33a80221420a");
+}
+
+#[test]
+fn lanczos_resize_matches_pil() {
+    use teasi::raster::{resize, Rgb};
+    let mut img = Rgb::new(64, 64);
+    for x in 0..64usize {
+        for y in 0..64usize {
+            img.set(
+                x,
+                y,
+                (
+                    ((x * 37 + y * 17) % 251) as u8,
+                    ((x * 11 + y * 53) % 241) as u8,
+                    ((x * 73 + y * 29) % 233) as u8,
+                ),
+            );
+        }
+    }
+    for (n, want) in [
+        (32usize, "d1c5f82006c819a0aaf38287eb9d9f22"),
+        (16, "b046428afcdeeded3d5798cdd5a38b1e"),
+        (8, "c38c68a7311f264e70c52349d1649cf0"),
+    ] {
+        let out = resize(&img, n, n);
+        assert_eq!(format!("{:x}", Md5::digest(out.rgb())), want, "resize to {}", n);
+    }
+}
+
+#[test]
+fn shading_matches_numpy() {
+    let side = 18usize;
+    let mut h = vec![0.0f64; side * side];
+    for i in 0..side {
+        for j in 0..side {
+            h[i * side + j] = ((i * 7 + j * 13) % 23) as f64 * 3.5 - ((i * j) % 5) as f64;
+        }
+    }
+    let s = teasi::terrain::shade(&h, side, 55.0);
+    let mut m = Md5::new();
+    for v in &s {
+        m.update(v.to_le_bytes());
+    }
+    assert_eq!(format!("{:x}", m.finalize()), "9a66a7403e4c2a3f58441f68950b6916");
+}

@@ -43,6 +43,12 @@ usage: teasi <command> [arguments]
   ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]
                              compile the address search incl. its search index
                              (--country=N, --name=<country>; needs libgeos)
+  terrain <heights> <area.poly> <out chart> [YYYYMMDD]
+                             compile the elevation model (heights from
+                             scripts/heights_export.py); --land=<land_polygons.shp>
+                             --area=<file.osm.pbf> add the map images (needs
+                             libgeos), --rate=R the compression ratio,
+                             --only=x,y builds a single region
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
 
@@ -697,6 +703,60 @@ fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<
     Ok(true)
 }
 
+fn compile_terrain(
+    args: &[String],
+    country: u32,
+    rate: f32,
+    land: Option<&str>,
+    area: Option<&str>,
+    only: Option<(i64, i64)>,
+) -> Result<bool> {
+    if args.len() < 3 {
+        bail!(
+            "usage: teasi terrain <heights> <area.poly> <out chart> [YYYYMMDD] \
+             [--rate=R] [--land=<land_polygons.shp> --area=<file.osm.pbf>] [--only=x,y]"
+        );
+    }
+    let (src, poly, dst) = (&args[0], &args[1], &args[2]);
+    let date = match args.get(3) {
+        Some(d) => d.clone(),
+        None => chart::today(),
+    };
+    let t0 = std::time::Instant::now();
+    let g = teasi::heights::Heights::load(src)?;
+    println!("  {} from {}", g.describe(), src);
+    println!("  openjpeg {}", teasi::raster::openjpeg_version());
+    let rings = teasi::poly::load(poly)?;
+    let land = match land {
+        Some(shp) => {
+            teasi::geos::available()?;
+            let l = teasi::land::extract(shp, &rings)?;
+            println!("  {} land polygons from {}", l.len(), shp);
+            Some(l)
+        }
+        None => None,
+    };
+    let areas = match area {
+        Some(pbf) => Some(teasi::area::extract(pbf, &|s| println!("  {}", s))?),
+        None => None,
+    };
+    let d = teasi::terrain::build(
+        &g,
+        &rings,
+        date.as_bytes(),
+        country,
+        rate,
+        &chart::device(),
+        land.as_deref(),
+        areas.as_ref(),
+        only,
+        &|s| println!("  {}", s),
+    )?;
+    std::fs::write(dst, &d)?;
+    println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
+    Ok(true)
+}
+
 fn run() -> Result<bool> {
     let all: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<String> = all.iter().filter(|a| !a.starts_with("--")).cloned().collect();
@@ -801,6 +861,24 @@ fn run() -> Result<bool> {
                 None => 4,
             };
             compile_poi(&args[0], &args[1..], country)
+        }
+        "terrain" => {
+            let country = match opt("country") {
+                Some(v) => v.parse().context("--country")?,
+                None => 17,
+            };
+            let rate = match opt("rate") {
+                Some(v) => v.parse().context("--rate")?,
+                None => teasi::terrain::RATE,
+            };
+            let only = match opt("only") {
+                Some(v) => match v.split_once(',') {
+                    Some((x, y)) => Some((x.trim().parse()?, y.trim().parse()?)),
+                    None => bail!("--only=x,y"),
+                },
+                None => None,
+            };
+            compile_terrain(&args[1..], country, rate, opt("land"), opt("area"), only)
         }
         "check" => {
             let mut ok = true;

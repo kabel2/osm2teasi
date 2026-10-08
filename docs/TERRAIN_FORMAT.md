@@ -331,6 +331,28 @@ stehen in Zellenreihenfolge, danach folgen die Höhen-Records.
   JP2-Boxen davor werden aus dem Original kopiert.
 - Der Blob ist wie bei den Vektor-Layern `encrypt_blob` eines Zufallsschlüssels.
 
+### In Rust
+
+`rust/src/terrain.rs` macht dasselbe ohne Pickle; `rust/src/raster.rs` baut die drei
+Pillow-Teile nach (Polygonfüller, Lanczos-Skalierung, Schattierung — alle drei bitgleich)
+und ruft OpenJPEG für die Höhenkacheln auf. Siehe [../rust/README.md](../rust/README.md).
+
+```bash
+./target/release/teasi terrain --country=17 \
+    --land=land-polygons-split-4326/land_polygons.shp \
+    --area=osm_ref/great-britain-latest.osm.pbf \
+    build/gb/dem.bin osm_ref/great-britain.poly \
+    build/gb/GreatBritain_terrain.v20260919 20260919      # 1:24, 7,9 GB
+```
+
+Verglichen wird mit `rust/scripts/terrain_compare.py`, nicht mit `teasi check` — der
+Layer hat keine Slot-Bereiche. Für Dänemark wie für Großbritannien sind **alle
+Höhenkacheln** (1034 bzw. 1999) byteidentisch mit der Python-Version, bis auf ein Byte:
+OpenJPEG schreibt seine eigene Version in den COM-Marker des Codestreams. Die
+Kartenbilder gehen durch einen anderen JPEG-Encoder (`jpeg-encoder` statt
+libjpeg-turbo); etwa die Hälfte ist trotzdem pixelgleich, die mittlere Abweichung
+beträgt 0,025 von 255, und die Dateien sind drei Hunderttausendstel kleiner.
+
 ## Umfeld-Dateien (Kontext)
 
 - `acsldata.dat` (67 B): `LBnXSdsP6rB8D5CiDqd9w9qv0xs5CH2o` \n

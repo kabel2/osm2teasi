@@ -260,7 +260,8 @@ Alle Python-Tools liegen in `tools/`. `chart.py`, `pc1.py`, `layers.py`, `writer
 Standardbibliothek (`hashlib`, `lzma`), `osm_extract.py`, `osm_poi_extract.py` und `osm_area_extract.py` zusätzlich
 `osmium` und `numpy`, `compile_osmarea.py` und `compile_osm.py` `shapely`, `osm_heights.py`,
 `compile_osm.py` und `compile_osmarea.py` `scipy`, `land_extract.py` `pyshp`,
-`dem_heights.py` `tifffile` + `imagecodecs` (`requirements.txt`). Zum Ausführen das Projekt-venv
+`dem_heights.py` `tifffile` + `imagecodecs` und `compile_terrain.py` `Pillow` + `shapely`
+(`requirements.txt`). Zum Ausführen das Projekt-venv
 verwenden (`.venv/bin/python`).
 
 Die Seriennummer des Geräts steht an einer Stelle: `DEVICE` in `tools/chart.py`, überschreibbar
@@ -536,7 +537,7 @@ wiederholt ihn am Ende; außen/innen entscheidet die Verschachtelung, nicht die
 Member-Rolle; und `area=no` verbietet die Fläche. Ohne das lagen 4,3 von 5,0 Mio.
 britischen Adressen um Median 1,6 m daneben.
 
-Fünf Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
+Alle sechs Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
 `osmpoint.rs`, alles in einem Lauf über das PBF (Großbritannien 35 bzw. 17 s statt
 24 min allein für die Extraktion); für Dänemark sind alle 3699 osmpoi- und alle 128
 osmpoint-Records bytegleich mit der Python-Version, für Großbritannien
@@ -569,6 +570,22 @@ Zeichen (vorher die Iterationsreihenfolge eines `set`, also vom Hash-Seed abhän
 und eine Korrelation unter 10⁻¹² gilt als null, statt mit ihrem letzten Bit die
 Richtung eines Hausnummernbereichs zu bestimmen.
 
+`terrain.rs` baut das Höhenmodell und die Kartenbilder. Für Dänemark wie für
+Großbritannien sind **alle Höhenkacheln** (1034 bzw. 1999) byteidentisch mit der
+Python-Version — bis auf ein Byte je Kachel, denn OpenJPEG schreibt seine eigene
+Version in den COM-Marker und Pillow bringt eine andere mit. Großbritannien braucht
+1:24 und 7,9 GB, und liest dabei das PBF und das Shapefile selbst; Python braucht für
+den Compiler allein 2 min und 10 GB, dazu die drei Extraktionen. Drei Teile von Pillow
+stecken in `raster.rs`, Zeile für Zeile aus den C-Quellen nachgebaut und alle drei
+bitgleich: der Polygonfüller (`ImageDraw.polygon`), die Lanczos-Skalierung
+(`Image.resize`) und die Reliefschattierung (`np.gradient`). Die Höhenkacheln gehen
+durch OpenJPEG selbst (`openjpeg-sys`), weil die Rate-Verteilung über die Codeblöcke
+Implementierungssache ist und der JP2-Decoder im Gerät nicht dokumentiert ist; die
+Kartenbilder durch `jpeg-encoder` statt libjpeg-turbo, was andere Bytes und etwa die
+Hälfte pixelgleiche Bilder ergibt (mittlere Abweichung 0,025 von 255). Verglichen wird
+mit `rust/scripts/terrain_compare.py`, weil `teasi check` den Layer nicht kennt — er hat
+keine Slot-Bereiche.
+
 ```bash
 ./target/release/teasi osmpoi  <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osmpoint <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
@@ -576,17 +593,21 @@ Richtung eines Hausnummernbereichs zu bestimmen.
 ./target/release/teasi osm <pbf> <poly> <original|-> <ausgabe> [JJJJMMTT] --country=17 \
     "--name=United Kingdom" --heights=<datei.bin>
 ./target/release/teasi ta <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17 "--name=United Kingdom"
+./target/release/teasi terrain <höhen.bin> <poly> <ausgabe> [JJJJMMTT] --country=17 \
+    --land=<land_polygons.shp> --area=<pbf>
 ./target/release/teasi md5s <karte>   # auf beiden Dateien, dann diff
 ```
 
-`osmarea`, `osm` und `ta` brauchen **libgeos** (shapely benutzt es auch, und bitgleich wird es
+`osmarea`, `osm`, `ta` und `terrain` (mit Bildern) brauchen **libgeos** (shapely benutzt es auch, und bitgleich wird es
 nur mit derselben Version): `geos.rs` lädt die Bibliothek zur Laufzeit per `dlopen`, zu
 finden über `TEASI_GEOS`. Der Build selbst braucht sie nicht. Eine Änderung ging zurück nach
 Python: `compile_osmarea.py` sortiert die Flächen jetzt nach ihrer osmium-Id, denn die
 Reihenfolge des Extraktors (libosmiums Puffer-Reihenfolge) entscheidet mit, welches
 Polygon in einer Vereinigung zuerst liegt, und ist nicht nachbaubar.
 
-Die übrigen Extraktoren und die drei anderen Layer-Compiler sind noch nicht portiert.
+Noch nicht portiert sind die Höhenquellen selbst: `osm_heights.py` (scipys `lsqr`) und
+`dem_heights.py` (Copernicus-Kacheln). Ihre Ergebnisse liest Rust über
+`rust/scripts/heights_export.py`.
 
 ---
 

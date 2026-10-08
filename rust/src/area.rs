@@ -50,6 +50,9 @@ pub struct ATags {
     pub leisure: Option<Box<str>>,
     pub man_made: Option<Box<str>>,
     pub waterway: Option<Box<str>>,
+    /// the terrain layer's land cover class, from the first tag in tag order
+    /// that carries one (`COVER` of compile_terrain.py)
+    pub cover: Option<u8>,
 }
 
 impl ATags {
@@ -69,6 +72,9 @@ impl ATags {
                 _ => continue,
             };
             *slot = Some(v.into());
+            if t.cover.is_none() {
+                t.cover = crate::terrain::cover_class(k, v);
+            }
         }
         (t, any)
     }
