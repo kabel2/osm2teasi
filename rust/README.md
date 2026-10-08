@@ -10,8 +10,7 @@ This was written in Python first and then ported here in those four stages, each
 against the Python output before the next began. That reference has served its purpose and is
 no longer in the tree; it is in the history up to commit `fc17505`, together with the
 comparison scripts, and the "what was checked" sections below are the record of what it
-agreed with. The only Python left is the elevation data: `../tools/dem_heights.py` for the
-Copernicus model and `../tools/heights_export.py` for the flat file this side reads.
+agreed with. Nothing but Rust is left.
 
 ## Status
 
@@ -33,7 +32,8 @@ Copernicus model and `../tools/heights_export.py` for the flat file this side re
 | Geometry (GEOS) | `geos.rs` | libgeos at run time, as shapely uses it |
 | Building the `osmarea` layer | `osmarea.rs` | |
 | Reading street and line ways | `way.rs` | |
-| Reading and querying heights | `heights.rs` | reads `../tools/heights_export.py`'s output |
+| The Copernicus DEM, the elevation grid | `dem.rs` | own GeoTIFF reader, scipy's Gaussian |
+| Reading and querying heights | `heights.rs` | reads what `dem.rs` writes |
 | Building the `osm` layer | `osm.rs` | |
 | Nearest-neighbour search | `grid.rs` | instead of scipy's kd-tree |
 | Building the `ta` layer (address search) | `ta.rs` | |
@@ -80,6 +80,7 @@ match the original byte for byte. For the Danish map that is all **14,185 record
 | `teasi ways <file.osm.pbf> <out>` | street and line ways as a canonical dump |
 | `teasi osm <pbf> <poly> <original\|-> <map> [date]` | build the osm layer (`--country=N`, `--name=…`, `--heights=…`) |
 | `teasi ta <pbf> <poly> <map> [date]` | build the address search (`--country=N`, `--name=…`) |
+| `teasi dem <poly> <tile dir> <out.bin>` | download the Copernicus DEM for that area and write the elevation grid (`--sigma=S`) |
 | `teasi terrain <heights> <poly> <map> [date]` | build the elevation model and the map images (`--land=…`, `--area=…`, `--rate=R`, `--only=x,y`) |
 
 The serial number comes from `TEASI_DEVICE` (the default being the
@@ -345,22 +346,39 @@ afterwards.
 ### Heights
 
 The ascent of an edge (B edge word [2]) comes from node heights, and those come from the
-**Copernicus elevation model**: `../tools/dem_heights.py` downloads the tiles from the AWS
-bucket, resamples them into one grid and smooths it, and `../tools/heights_export.py` writes
-that grid as the flat binary file `heights.rs` reads. It is a one-off computation per
-country, which is why it stayed in Python — the libraries for a GeoTIFF archive and a
-Gaussian filter are there.
+**Copernicus DEM GLO-90** (`dem.rs`): `teasi dem` downloads the 1°×1° tiles covering an area
+from the public AWS bucket, decimates them onto one grid of 3″ (1200 points per degree) and
+smooths it with a Gaussian of σ = 1 grid point, because the DEM is a *surface* model and
+trees and houses would otherwise add up to spurious ascents along the roads.
 
 ```bash
-python tools/dem_heights.py osm_ref/great-britain.poly osm_ref/dem build/gb/dem.pkl
-python tools/heights_export.py build/gb/dem.pkl build/gb/dem.bin
+./target/release/teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin
 ```
+
+Great Britain is 234 tiles and a 15,600 × 21,600 grid: 3.6 s and 3.3 GB from cached tiles,
+against about a minute in Python. Two pieces of this had to be rebuilt exactly, both
+verified against the libraries they replace (`tests/compat.rs`):
+
+- **The GeoTIFF.** The tiles are float32, one DEFLATE-compressed tile per file, with the
+  floating-point predictor of TIFF Technical Note 3: per tile row the bytes are accumulated
+  with a stride of **one sample** — not one value, which is the easy mistake, and a tempting
+  one because flat zero areas still come out right, so three quarters of the grid looks fine
+  — and then the byte planes are de-interleaved, most significant first. The images get
+  narrower towards the pole (1200 columns below 50° N, 800 up to 60°, 600 above), which is
+  what the decimation to 1200 is for.
+- **The Gaussian.** `scipy.ndimage.gaussian_filter`, down to the rounding: the kernel is
+  normalised with **numpy's pairwise summation**, each pass accumulates in f64 and stores
+  f32, and the taps are added **last to first**. Adding them the other way round is in fact
+  the more accurate of the two (`math.fsum` agrees with it) but moves one value in 337
+  million by an ULP — and with the order right the whole 1.35 GB grid for Great Britain comes
+  out byte-identical with the one Python built.
 
 `heights.rs` also reads heights **per node**, which is how the Danish map was reproduced
 exactly: the ascents of an original chart are an over-determined linear system for its node
 heights, and solving it (scipy's `lsqr` over 2.1 M equations) gives them back to within
 50 cm for 97.5 % of the edges. That reconstruction only makes sense where an original file
-exists; it is in the history, with the rest of the Python reference.
+exists and is the one thing not ported; it is in the history, with the rest of the Python
+reference.
 
 For the node heights the 4 nearest neighbours are needed (inverse distance²). Instead of a
 kd-tree as in scipy, a uniform grid lies over the known points and is searched ring by ring
@@ -474,8 +492,8 @@ place areas that already differ by 27 m there.
 
 `terrain.rs` builds the type 5 file: per region (1.40625°) 8×8 cells of 256×256 px, the
 heights as JPEG 2000 tiles and the map images as JPEG, the latter additionally as a pyramid
-of 4×4, 2×2 and 1×1. The heights come from `heights.rs` (the export of
-`../tools/dem_heights.py`), the land cover from `area.rs` and the sea from `land.rs`.
+of 4×4, 2×2 and 1×1. The heights come from `heights.rs` (what `teasi dem` wrote), the land
+cover from `area.rs` and the sea from `land.rs`.
 
 ```bash
 # the elevation profile only, like region (122,20) of Denmark_terrain

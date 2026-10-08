@@ -33,26 +33,18 @@ OSM" (commands, runtime, RAM) and a section "Open questions".
 ## Layout of this repository
 
 ```
-rust/             the implementation: the shell, reading OSM, all six compilers
+rust/             everything: the shell, reading OSM, all six compilers, the DEM
 docs/             format documentation, start with CHART_FILES.md
-tools/            Python helpers for the elevation data (see below)
 ghidra_scripts/   headless scripts for analysing the firmware in Ghidra
 ```
 
-Everything is in `rust/` — one binary, `teasi`, with a subcommand per job
-([rust/README.md](rust/README.md) describes them all). Only the elevation data still comes
-from Python: it is a one-off step per country, and the libraries for a GeoTIFF archive and a
-Gaussian filter are there.
+One binary, `teasi`, with a subcommand per job — [rust/README.md](rust/README.md) describes
+them all. No other runtime and no build step beyond `cargo build`.
 
-| Helper | Purpose |
-|---|---|
-| `tools/dem_heights.py` | download the Copernicus DEM GLO-90 for an area and resample it into one grid (with `poly.py` for the boundary) |
-| `tools/heights_export.py` | write that grid as the flat binary that `teasi terrain` and `teasi osm --heights` read |
-
-This started as a Python implementation and was then ported to Rust, module by module,
-each step checked against the Python output record by record. That reference was removed
-once the port was complete and every layer agreed; it is in the history up to commit
-`fc17505`, together with the comparison scripts that drove it.
+This started as a Python implementation and was then ported to Rust, module by module, each
+step checked against the Python output record by record. That reference was removed once the
+port was complete and every layer agreed; it is in the history up to commit `fc17505`,
+together with the comparison scripts that drove it.
 
 ## Getting started
 
@@ -84,12 +76,12 @@ Build a layer from OSM (POIs here; the other layers are in the layer documents):
 `osmarea`, `osm`, `ta` and `terrain` need libgeos, which is opened at run time, so building
 `teasi` does not need it — see `rust/src/geos.rs`.
 
-For the elevation data (`terrain`, and the ascents of the routing graph):
+The elevation data for `terrain` and for the ascents of the routing graph comes from the
+Copernicus DEM GLO-90; `teasi dem` downloads the 1°×1° tiles covering an area, decimates
+them onto one 3″ grid and smooths it:
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python tools/dem_heights.py osm_ref/great-britain.poly osm_ref/dem build/gb/dem.pkl
-.venv/bin/python tools/heights_export.py build/gb/dem.pkl build/gb/dem.bin
+./target/release/teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin
 ```
 
 ### Device binding
@@ -113,7 +105,8 @@ All 14,185 records of the Danish map are taken apart and rebuilt byte-identicall
 Address extraction for Denmark takes 4.7 s for all 2,628,399 entries, the osmpoi layer for
 Great Britain 35 s. The street layer for Great Britain takes 4:13 from the 2.2 GB PBF
 straight into the 531 MB chart file, the terrain layer 1:24 including reading the PBF and
-the land polygon shapefile. Details and the comparison against the Python reference in
+the land polygon shapefile, and the elevation grid for the whole island 3.6 s from cached
+tiles. Details and the comparison against the Python reference in
 [rust/README.md](rust/README.md).
 
 ## What is not in here
@@ -122,8 +115,8 @@ No device dump, no firmware, no OSM extracts, no built maps — those are severa
 and the original maps are someone else's licensed data. What you need:
 
 - a Geofabrik extract and the matching `.poly` file (`download.geofabrik.de`),
-- for `terrain` the Copernicus DEM (`tools/dem_heights.py` downloads it itself) and the
-  land polygons from `osmdata.openstreetmap.de`,
+- for `terrain` the Copernicus DEM (`teasi dem` downloads it itself) and the land polygons
+  from `osmdata.openstreetmap.de`,
 - an original map from the device, for calibration.
 
 ## Legal

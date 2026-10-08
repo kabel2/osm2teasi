@@ -13,7 +13,6 @@ venv/
 /dem/
 *.osm.pbf
 *.poly
-*.pkl
 *.shp
 *.dbf
 *.shx

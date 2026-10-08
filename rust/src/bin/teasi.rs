@@ -38,14 +38,18 @@ usage: teasi <command> [arguments]
   ways <file.osm.pbf> <out>  the road and line ways as a canonical dump
   osm <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]
                              compile the street layer; --heights=<file> adds the
-                             ascents (tools/heights_export.py), --name=<country>
+                             ascents (from `teasi dem`), --name=<country>
                              the country name of the A records (needs libgeos)
   ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]
                              compile the address search incl. its search index
                              (--country=N, --name=<country>; needs libgeos)
+  dem <area.poly> <tile dir> <out.bin>
+                             download the Copernicus DEM GLO-90 for that area
+                             and write the elevation grid --heights= reads
+                             (--sigma=S smooths it, default 1)
   terrain <heights> <area.poly> <out chart> [YYYYMMDD]
                              compile the elevation model (heights from
-                             tools/heights_export.py); --land=<land_polygons.shp>
+                             `teasi dem`); --land=<land_polygons.shp>
                              --area=<file.osm.pbf> add the map images (needs
                              libgeos), --rate=R the compression ratio,
                              --only=x,y builds a single region
@@ -705,6 +709,30 @@ fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<
     Ok(true)
 }
 
+/// Download the Copernicus DEM for an area and write the flat heights file.
+fn dem(args: &[String], sigma: f64) -> Result<bool> {
+    if args.len() < 3 {
+        bail!("usage: teasi dem <area.poly> <tile dir> <out.bin> [--sigma=S]");
+    }
+    let (poly, tdir, dst) = (&args[0], &args[1], &args[2]);
+    let t0 = std::time::Instant::now();
+    let rings = teasi::poly::load(poly)?;
+    let g = teasi::dem::build(&rings, std::path::Path::new(tdir), sigma, &|s| {
+        println!("  {}", s)
+    })?;
+    g.write(dst)?;
+    println!(
+        "grid {}x{}, {:.6} deg, sigma {} -> {} in {:.1} s",
+        g.rows,
+        g.cols,
+        g.step,
+        sigma,
+        dst,
+        t0.elapsed().as_secs_f32()
+    );
+    Ok(true)
+}
+
 fn compile_terrain(
     args: &[String],
     country: u32,
@@ -863,6 +891,13 @@ fn run() -> Result<bool> {
                 None => 4,
             };
             compile_poi(&args[0], &args[1..], country)
+        }
+        "dem" => {
+            let sigma = match opt("sigma") {
+                Some(v) => v.parse().context("--sigma")?,
+                None => teasi::dem::SIGMA,
+            };
+            dem(&args[1..], sigma)
         }
         "terrain" => {
             let country = match opt("country") {

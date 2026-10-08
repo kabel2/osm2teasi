@@ -268,12 +268,12 @@ cd rust && cargo build --release        # ./target/release/teasi
 | `roundtrip <chart> [out]` | decode the whole file, write it again, compare (5.3) |
 | `index <ta chart>` | the search index: parse, rebuild, compare |
 | `ways`, `addr`, `poi`, `area`, `land` | the OSM extractors, as canonical dumps (5.5) |
+| `dem <area.poly> <tile dir> <out.bin>` | the Copernicus elevation grid (5.5) |
 | `osmpoi`, `osmpoint`, `osmarea`, `osm`, `ta`, `terrain` | the six layer compilers (5.6) |
 
 `osmarea`, `osm`, `ta` and `terrain` need libgeos, opened at run time (`src/geos.rs`), so
-building the binary itself needs nothing but a Rust toolchain. The elevation data for
-`terrain` and for the ascents of the routing graph comes from `tools/dem_heights.py` and
-`tools/heights_export.py`, the only Python left (`requirements.txt`).
+building the binary itself needs nothing but a Rust toolchain, and running it needs nothing
+else at all.
 
 The device's serial number sits in one place: `DEVICE` in `rust/src/chart.rs`, overridable
 with the environment variable `TEASI_DEVICE`. Every function with a `device` parameter takes
@@ -414,7 +414,7 @@ file name. **Files without an entry** are not checked but are loaded anyway: the
 reads every `*.v*` in `Countries` (which is how the Great Britain files run, 5.7). With the
 entries updated the message disappears (checked on the device, 2026-09-18).
 
-### 5.5 The OSM extractors
+### 5.5 The extractors and the elevation model
 
 Each compiler reads its own objects out of a Geofabrik extract: `way.rs` the roads, paths,
 watercourses, railways and land use with their tags, node ids and coordinates in Teasi units
@@ -434,6 +434,19 @@ of 2021) comes from `download.geofabrik.de/europe/denmark-220101.osm.pbf`. A Tea
 assigned to a way by converting its points (`X = cell_x·32768 + u − 512`) and comparing
 against `round(X_osm)`.
 
+**Elevations** do not come from OSM but from the **Copernicus DEM GLO-90**. `teasi dem`
+downloads the 1°×1° tiles covering a boundary polygon from the public AWS bucket
+`copernicus-dem-90m` (a tile that does not exist is open sea and is remembered as an empty
+`.none` file), decimates them onto one grid of 3″ — 1200 points per degree, which is what
+the tiles hold below 50° N; further north they are narrower — and smooths it with a Gaussian
+of σ = 1 grid point, because the DEM is a *surface* model and trees and houses would
+otherwise add up to spurious ascents along the roads. `teasi osm --heights=` and
+`teasi terrain` read the result.
+
+```bash
+teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin   # 234 tiles, 3.6 s cached
+```
+
 ### 5.6 Compilers: layers from current OSM data
 
 | Layer | Command | Status |
@@ -443,7 +456,7 @@ against `round(X_osm)`.
 | osmarea | `teasi osmarea` | finished, calibrated against the original, see [OSMAREA_FORMAT.md](OSMAREA_FORMAT.md) "Building it from OSM"; the sea outside the boundary and the Faroe Islands come from the original file |
 | osm | `teasi osm` | finished, calibrated against the original, see [OSM_FORMAT.md](OSM_FORMAT.md) "Building it from OSM"; with left turns and ascents in the routing graph (`--heights`); the Faroe Islands from the original file; the map is OK on the device |
 | ta | `teasi ta` | address search: places, streets, house numbers, postcode districts and the search index, calibrated against the original, see [TA_FORMAT.md](TA_FORMAT.md) "Building it from OSM"; the search itself was replayed offline against the firmware's semantics (TA_FORMAT.md, "Search index") and then tested on the device |
-| terrain | `teasi terrain` | elevation model (the elevation profile) and map images (a hillshade coloured by land cover), see [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md); the heights come from `tools/dem_heights.py` |
+| terrain | `teasi terrain` | elevation model (the elevation profile) and map images (a hillshade coloured by land cover), see [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md); the heights come from `teasi dem` |
 
 Every compiler takes `--country=N`; osm and osmarea also run without an original file (`-`),
 see 5.7.
@@ -469,11 +482,12 @@ details are in the layer documents.
 
 | Step | Command | Time | RAM |
 |---|---|---:|---:|
+| DEM grid | `teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin` | 3.6 s | 3.3 GB |
 | POIs | `teasi osmpoi … --country=17` / `teasi osmpoint …` | 35 + 17 s | 0.9 GB |
 | Areas | `teasi osmarea … - --country=17 --land=…` | 3:10 | 7.1 GB |
 | Streets | `teasi osm --heights=… --country=17 "--name=United Kingdom" … -` | 4:13 | 16.0 GB |
 | Addresses | `teasi ta --country=17 "--name=United Kingdom" …` | 3:19 | 13.7 GB |
-| Elevation | `teasi terrain --country=17 --land=… --area=… …` | 1:24 | 7.9 GB |
+| Terrain | `teasi terrain --country=17 --land=… --area=… …` | 1:24 | 7.9 GB |
 
 The result: osm 531 MB (12.1 M graph nodes, 30 M edges, 57 % with an ascent, 33 % of the
 nodes with left turns), osmarea 83 MB, osmpoi 17 MB (750,000 POIs), osmpoint 0.5 MB (12,561
@@ -486,7 +500,7 @@ routing footpaths, for instance).
 
 **terrain (2026-09-19):** without a terrain file the elevation profile of a tour shows
 nothing. `GreatBritain_terrain.v20260919` (37 MB, 85 regions) holds the elevation tiles from
-`build/gb/dem.bin` (the export of `tools/dem_heights.py`) plus the map images:
+`build/gb/dem.bin` (what `teasi dem` wrote) plus the map images:
 ```bash
 teasi terrain --country=17 --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
     --area=osm_ref/great-britain-latest.osm.pbf \
@@ -526,9 +540,9 @@ can be disassembled with Capstone.
 Everything described above was first written in Python and then ported to Rust module by
 module, with the Python output as the reference at every step: the shell (PC1, the header MAC,
 raw LZMA1, the containers A/B/C/D and osmpoint, the writer, the search index), reading OSM,
-and all six compilers. Once every layer agreed the reference was removed; it is in the
-history up to commit `fc17505`. The record of what agreed with what is this section, and the
-checks that do not need the reference are still here:
+and all six compilers, and finally the elevation grid. Once every layer agreed the reference
+was removed; it is in the history up to commit `fc17505`. The record of what agreed with what
+is this section, and the checks that do not need the reference are still here:
 
 ```bash
 cd rust && cargo build --release
@@ -621,9 +635,15 @@ thing the port forced: the areas are sorted by their osmium id, because the extr
 (libosmium's buffer order) helps decide which polygon comes first in a union and cannot be
 reproduced.
 
-**What stays in Python:** the elevation data. `tools/dem_heights.py` downloads the Copernicus
-tiles and resamples them into one grid, `tools/heights_export.py` writes that grid as the flat
-binary file that `teasi terrain` and `teasi osm --heights=` read.
+**Nothing stays in Python.** The elevation data was the last piece (`dem.rs`): its own
+GeoTIFF reader for the Copernicus tiles — float32, DEFLATE, the floating-point predictor of
+TIFF Technical Note 3 — and `scipy.ndimage.gaussian_filter` reproduced down to the rounding,
+numpy's pairwise summation for the kernel included. The 1.35 GB grid for Great Britain comes
+out **byte-identical** with the one Python built, and a Danish test box does too; the TIFF
+reader and the Gaussian are pinned in `rust/tests/compat.rs` against fixtures from
+`tifffile` and scipy. What remains unported is only the reconstruction of node heights from
+an original chart's ascents (scipy's `lsqr` over 2.1 M equations), which needs an original
+file to begin with.
 
 ---
 

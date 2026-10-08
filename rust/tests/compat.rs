@@ -955,3 +955,109 @@ fn shading_matches_numpy() {
     }
     assert_eq!(format!("{:x}", m.finalize()), "9a66a7403e4c2a3f58441f68950b6916");
 }
+
+// --------------------------------------------------------------------------
+// dem (the Copernicus elevation grid)
+// --------------------------------------------------------------------------
+
+/// A 20x13 float32 GeoTIFF as tifffile writes one: tiled 16x16 (so two tiles,
+/// the second one mostly padding), DEFLATE, floating-point predictor -- the
+/// shape the Copernicus tiles come in.  Its values are `Lcg` with seed 99.
+const DEM_TIFF: &str = "\
+49492a0008000000110000010400010000000d0000000101040001000000140000000201030001\
+000000200000000301030001000000b28000000601030001000000010000000e01020014000000\
+da0000001501030001000000010000001a01050001000000fe0000001b01050001000000060100\
+00280103000100000001000000310102000c0000000e0100003d01030001000000030000004201\
+0400010000001000000043010400010000001000000044010400020000001a0100004501030002\
+000000d3031101530103000100000003000000000000007b227368617065223a205b32302c2031\
+335d7d000000000000000000000000000000000001000000010000000100000001000000746966\
+6666696c652e70790030010000030500000000000000000000000000000000789c25937b505465\
+18c69fb32297e2a25c422e6de3e0b2c972274b2e060e2223217129248135cc61c801350c82d03d\
+e7ac5c449052b9bad0344c126008443241480884356d20b0b166db1481132dd872190463dde377\
+d6ef8fefbfe7fd3deffbbcef204b8166691680dea40fd83c3e54e134575072cc66f67ce1696041\
+2794687cccac4c72cba7273701d637e4558d914b56bde39e837fcf03fb88d0a8e63fa2afbefe8e\
+da669370b2d52bf37ecb0890f7782658acd37d7029a4b9f3c122405d6e9174984dad171dcca67a\
+5e0086089b63c072e004f41ee0f3154b0bd794f22bdbf5fd2979b6c0aaada849e4b437dcd2cace\
+7759082c16a7754f7db7e4159355aaec5b277c8ea2cf0a288aa30c2c730ba8595f3ddf60504b5c\
+9acf74fd540f8c047fb373463c1e23b039eeeefb32e0f8de98fb83a2e7fe4a686cadeb8f04c229\
+c2a7685ac05190bd0e5c2bbf7c473a2ae975fa756d67f56d20782d215aee2d7d525be0d6ebb615\
+88f7983d5219a7fcdebac92df0b50bbc9e770e03055288f49fec2e5e14ddd725db516dceed5540\
+b6e24b6783acd63cd4ecea277211208e4cb7eeb2adf5fdc379e06793e779ff0c180ae4110344ff\
+466645fbc2c03f1f7f3431587f420be46e78344f773f4abc1011a0939601165e3f362c375d6c68\
+bb6d72a9d8999f3fd1c120a0398ae5e7d7ce8cd5e435fae4f88d5e55160e03ecbb87b43d9ae35a\
+2688528b4380b2fe589534599a149df06adf2937e29f61085a6020bf9ce7ff22b31bf8cd5f6efe\
+d58742857926f0ffd0d6f09631cbc9436d75db1e3d24f5d263d60266df5cf04c4d53447ccbf369\
+0e8c00345863ff671d84c13f7897ec35750fcfb7789fe4fdd6545ac6ca46eacc67fe5dd7ba8180\
+8bee0505c2be3445dc7ef1b092cf5f46c02401163296e4676a37faefc1ec93e726926e7eaac801\
+7625766e8950b97a1ef52c2b394996ada2b24339122868b2f23930d9d1c5fb276032418e7a2207\
+e9bf14ce57a25cb52ebb0a0afdee040059cd45b339dbe3e35db487635b75c080bdde21e35c7aad\
+fdd4e3bbe3378cfb2ba3588e869ce6e4c47fb3e677372f55ee7e3b7d9cc0210ac8b0094bd5e803\
+a33d6a065ed941fc476737481c57aa8ffe59dc5f37a77a963f1f00cbb10cdd0f1c0ef1ee1996fc\
+67db9abbf9661ce9bf5ee4e1b8a5e7bafacc34b3bbca02d06c6c0bd0e64a2c828441f3abf78c7c\
+9a35088ce763dcbf41a73d778595f6212f4d503eb180b2f4ebc825e9a99ece447559d631c032b4\
+ebc4749bff8e87cbaab87b84bf8fa6c901530c456a70647e2da75b94a161555fc404ef36993703\
+5e7c5b94728b1934457e896ffe11c02f2a3ee940755853a97f7af69c02780ab35e9210789c3bdc\
+c8f09fb1be819181e13fc3ff7d0c0c1bd2421af73bf3ef9b146bba3d9e8781c1d3eee7e3b34e2f\
+62736ebfee39bf878121614bab64587385cfd6ea6865d67f0c0c0799181aeb1a191a1afeff67fe\
+07d4df3f237d79ebd3a8b2236d27a4c5fc1818be372d4fe9397a87293f2ca9e3e05d06068173ef\
+c3f416b4451f8ab6b9d750cec0e0c20004ff1918eb1beb1b1980e667ac657fba46ee82f4cf7fa1\
+53f2fe3030546db4fccdccf37be9ffd30dcf8b81e6b9dd96f81d94be7ebbff951f8cd777313038\
+37343434fe67fcd7d8083407a8bf533cf4b72bbb52ddb7fb874cdb2f3230bcb8c0d4a3b2c8a0cd\
+7075dcd499d718180ae648662c48659bfc3824fd299707c3281805231a0000a5f46e01";
+
+#[test]
+fn gaussian_kernel_matches_scipy() {
+    // `scipy.ndimage._filters._gaussian_kernel1d(sigma, 0, int(4*sigma+0.5))`,
+    // md5 over the little-endian f64 weights.  sigma 33 has 265 of them, which
+    // is where numpy's pairwise summation starts splitting the normaliser.
+    for (sigma, n, want) in [
+        (1.0, 9, "137a5f3584d37a01893d3d7f4e12d607"),
+        (2.5, 21, "9424ec249627a548355d90564fceb2cc"),
+        (33.0, 265, "6285e5746915b53dca6b542a92d210fd"),
+    ] {
+        let (lw, w) = teasi::dem::kernel(sigma);
+        assert_eq!(w.len(), n, "sigma {}", sigma);
+        assert_eq!(2 * lw + 1, n);
+        let mut m = Md5::new();
+        for v in &w {
+            m.update(v.to_le_bytes());
+        }
+        assert_eq!(format!("{:x}", m.finalize()), want, "sigma {}", sigma);
+    }
+}
+
+#[test]
+fn gaussian_filter_matches_scipy() {
+    // `scipy.ndimage.gaussian_filter(a, sigma)` over the same 37x41 f32 grid.
+    let (rows, cols) = (37usize, 41usize);
+    let mut r = Lcg(12345);
+    let a: Vec<f32> = (0..rows * cols).map(|_| (r.next() * 900.0 - 100.0) as f32).collect();
+    let mut m = Md5::new();
+    for v in &a {
+        m.update(v.to_le_bytes());
+    }
+    assert_eq!(format!("{:x}", m.finalize()), "757a14f3e0c94cf2b5dd42bc1a7adb60", "input");
+    for (sigma, want) in
+        [(1.0, "daeacdf089fb959e18ef475bd2c53d3e"), (2.5, "2a7c97530536faaf720808476e146e20")]
+    {
+        let out = teasi::dem::gaussian(&a, rows, cols, sigma);
+        let mut m = Md5::new();
+        for v in &out {
+            m.update(v.to_le_bytes());
+        }
+        assert_eq!(format!("{:x}", m.finalize()), want, "sigma {}", sigma);
+    }
+}
+
+#[test]
+fn dem_tiff_matches_tifffile() {
+    let raw: Vec<u8> = (0..DEM_TIFF.len() / 2)
+        .map(|i| u8::from_str_radix(&DEM_TIFF[2 * i..2 * i + 2], 16).unwrap())
+        .collect();
+    let (rows, cols, z) = teasi::dem::decode_tiff(&raw, "fixture").unwrap();
+    assert_eq!((rows, cols), (20, 13));
+    let mut r = Lcg(99);
+    for (i, &v) in z.iter().enumerate() {
+        assert_eq!(v, (r.next() * 2000.0 - 500.0) as f32, "value {}", i);
+    }
+}

@@ -320,8 +320,8 @@ It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.
    directions, bit 30 from `oneway` (`-1` backwards; `oneway:bicycle=no` both ways). Node
    `[2]` = the left turns per the rule above. Edge `[2]` = the ascent: the height at every
    vertex from the 4 nearest nodes of the original (inverse distance²) or, without an
-   original, bilinearly from the Copernicus elevation model (`tools/dem_heights.py`, see
-   below); then the sum of the height gains. Edges whose end nodes are more than 63 cells
+   original, bilinearly from the Copernicus elevation model (`teasi dem`, see below); then
+   the sum of the height gains. Edges whose end nodes are more than 63 cells
    apart (long ferries) do not enter the graph.
 5. **D**: edges and lines (a3/a4) cut at the cell margin ± 512, a1 sorted by class and name.
    **A**: the name table per 4×4 cell, from the names of its 64 D cells.
@@ -338,7 +338,7 @@ It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.
 **Countries without an original file** (Great Britain): pass `-` as the original, and then
 c2/c4 stay empty and nothing is copied; `--country=N` (the header's country code,
 CHART_FILES.md 1), `--name=<country>` (the country name in the A record). The ascents come
-from the **Copernicus DEM GLO-90** (`tools/dem_heights.py`: tiles from the public AWS bucket
+from the **Copernicus DEM GLO-90** (`teasi dem`: tiles from the public AWS bucket
 `copernicus-dem-90m`, resampled onto a 3″ grid, Gaussian smoothing σ = 1 grid point, because
 the model is a surface model with trees and houses). Calibrated on Denmark against the
 original ascents: σ = 0 gives a correlation of 0.76 (sum 1.77×), **σ = 1 a correlation of
@@ -347,8 +347,7 @@ original ascents: σ = 0 gives a correlation of 0.76 (sum 1.77×), **σ = 1 a co
 and was what the Danish map was rebuilt with.
 
 ```bash
-python tools/dem_heights.py osm_ref/great-britain.poly osm_ref/dem build/gb/dem.pkl   # ~1 min
-python tools/heights_export.py build/gb/dem.pkl build/gb/dem.bin
+teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin    # 234 tiles, 3.6 s cached
 teasi osm --heights=build/gb/dem.bin --country=17 "--name=United Kingdom" \
     osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly - \
     build/gb/GreatBritain_osm.v20260918 20260918       # 4:13, 16.0 GB

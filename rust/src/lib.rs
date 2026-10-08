@@ -4,6 +4,7 @@
 pub mod addr;
 pub mod area;
 pub mod chart;
+pub mod dem;
 pub mod geos;
 pub mod grid;
 pub mod heights;

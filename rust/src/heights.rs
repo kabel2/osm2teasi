@@ -1,9 +1,8 @@
 //! Node heights for the ascents of the routing graph (B edge word [2]).
 //!
 //! Two sources: heights per node, reconstructed from the routing graph of an
-//! original chart, or an elevation grid from the Copernicus DEM
-//! (`tools/dem_heights.py`).  Both arrive here as the flat binary that
-//! `tools/heights_export.py` writes from their pickle:
+//! original chart, or an elevation grid from the Copernicus DEM (`dem.rs`,
+//! `teasi dem`).  Both arrive as the same flat little-endian file:
 //!
 //! ```text
 //! "TEASIHT1" kind:u32  kind 0 = nodes, 1 = grid

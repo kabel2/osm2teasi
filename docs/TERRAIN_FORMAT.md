@@ -301,7 +301,7 @@ records.
   - The image is cut into 256-pixel tiles, and the pyramid levels are added (Lanczos).
 - Images go to every cell that touches the polygon or contains land.
 - Elevation tiles exist only for cells with land (height > 0).
-- The heights are read bilinearly from the `tools/dem_heights.py` grid. `a1` is the minimum and
+- The heights are read bilinearly from the `teasi dem` grid. `a1` is the minimum and
   `a0 = 65535 // span` in 1/6 m.
 - Encoding is done with OpenJPEG (the same parameters Pillow's plugin sets):
   `irreversible`, 6 resolutions, 64×64, LRCP,

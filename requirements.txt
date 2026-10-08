@@ -1,7 +1,0 @@
-# The Rust port needs only these two helpers in tools/, for the elevation data:
-# dem_heights.py (Copernicus DEM -> grid) and heights_export.py (grid -> flat
-# file).  Python 3.12+, developed with 3.14.
-numpy>=2.0
-scipy>=1.14            # dem_heights: Gaussian filter
-tifffile>=2025.1.1     # dem_heights: Copernicus DEM (GeoTIFF)
-imagecodecs>=2025.1.1  # dem_heights: DEFLATE/LZW in the DEM tiles
