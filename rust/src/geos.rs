@@ -368,9 +368,13 @@ impl Geom {
         owned(unsafe { (a.GEOSIntersection_r)(c, self.0, o.0) }, "intersection")
     }
 
+    /// `clip_by_rect`.  GEOS's rectangle clipper gives up on some nearly
+    /// degenerate polygons ("LinearRing found 3", France's land cover); the
+    /// full overlay with the rectangle gives the same area there.
     pub fn clip_by_rect(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> Result<Geom> {
         let (a, c) = both();
         owned(unsafe { (a.GEOSClipByRect_r)(c, self.0, x0, y0, x1, y1) }, "clipByRect")
+            .or_else(|_| self.intersection(&Geom::rect(x0, y0, x1, y1)?))
     }
 
     /// `simplify(tolerance, preserve_topology=True)`
