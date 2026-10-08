@@ -113,4 +113,4 @@ Reverse Engineering zur Interoperabilität mit dem eigenen, gekauften Gerät. Di
 Karten enthalten ausschließlich OpenStreetMap-Daten (ODbL) sowie Höhen aus dem Copernicus-DEM;
 Originalkarten oder Firmware-Teile gehören nicht ins Repo und werden hier nicht verteilt.
 
-Lizenz der Werkzeuge: noch offen.
+Die Werkzeuge stehen unter der [MIT-Lizenz](LICENSE).
