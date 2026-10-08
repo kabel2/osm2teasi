@@ -228,6 +228,10 @@ Die Reihenfolge der Objekte in der Originaldatei folgt keiner erkennbaren Sortie
     build/<ordner>/Denmark_osmpoint.v20210916 [JJJJMMTT]
 ```
 
+In Rust macht `teasi osmpoint <pbf> <poly> <ausgabe> [JJJJMMTT] --country=N` beides in
+einem Lauf, ohne Pickle; für Dänemark sind alle 128 Records bytegleich, für
+Großbritannien 353 von 354 (`rust/README.md`, Stufe 3).
+
 Übernommen wird jedes Objekt mit `seamark:type`, für das es eine Kategorie gibt (nicht z. B.
 `small_craft_facility`, `pile`, `cable_submarine`, `navigation_line`), innerhalb der
 Geofabrik-Grenze. Position: Knoten direkt, Flächen über den Schwerpunkt, gerundet auf 360°/2²⁵.

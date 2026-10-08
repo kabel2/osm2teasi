@@ -3,13 +3,12 @@
 Portierung der Werkzeugkette nach Rust. Fertig sind **die Hülle** (Stufe 1:
 Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex),
 **das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion) und
-**der erste Layer-Compiler** (Stufe 3: `osmpoi`, aus dem PBF direkt in die
-Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben die Referenz;
-was hier steht, muss dasselbe liefern.
+**die ersten zwei Layer-Compiler** (Stufe 3: `osmpoi` und `osmpoint`, aus dem PBF
+direkt in die Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben die
+Referenz; was hier steht, muss dasselbe liefern.
 
-Noch nicht portiert: die fünf übrigen Layer-Compiler (`compile_osm.py`,
-`compile_osmarea.py`, `compile_osmpoint.py`, `compile_ta.py`,
-`compile_terrain.py`).
+Noch nicht portiert: die vier übrigen Layer-Compiler (`compile_osm.py`,
+`compile_osmarea.py`, `compile_ta.py`, `compile_terrain.py`).
 
 ## Stand
 
@@ -25,8 +24,9 @@ Noch nicht portiert: die fünf übrigen Layer-Compiler (`compile_osm.py`,
 | Landesgrenze (`.poly`) | `poly.py` | `poly.rs` |
 | POIs lesen | `osm_poi_extract.py` | `poi.rs` |
 | Layer `osmpoi` bauen | `compile_osmpoi.py` | `osmpoi.rs` |
+| Layer `osmpoint` bauen | `compile_osmpoint.py` | `osmpoint.rs` |
 | Straßen, Flächen, Höhen lesen | `osm_extract.py` u. a. | – |
-| Die fünf übrigen Layer bauen | `compile_*.py` | – |
+| Die vier übrigen Layer bauen | `compile_*.py` | – |
 
 ## Bauen und prüfen
 
@@ -57,6 +57,7 @@ osmpoint 110) in 1,3 s.
 | `teasi addr <datei.osm.pbf> [aus]` | Adressen, Orte und Interpolationswege aus OSM |
 | `teasi poi <datei.osm.pbf> <aus>` | POI-Kandidaten als kanonischer Dump |
 | `teasi osmpoi <pbf> <poly> <karte> [datum]` | den osmpoi-Layer bauen (`--country=N`) |
+| `teasi osmpoint <pbf> <poly> <karte> [datum]` | den osmpoint-Layer bauen (`--country=N`) |
 
 Die Seriennummer kommt wie bei den Python-Werkzeugen aus `TEASI_DEVICE`
 (Standard: die in `chart.rs`).
@@ -157,15 +158,18 @@ Eine zweite Stelle war feiner: CPythons `sum()` summiert Gleitkommazahlen seit 3
 **kompensiert** (Neumaier). Ein naives `for`-Summieren in Rust lag deshalb ein Bit
 daneben — `osm::fsum` macht es jetzt genauso.
 
-## Stufe 3: der osmpoi-Layer
+## Stufe 3: die Layer osmpoi und osmpoint
 
-`poi.rs` ist `osm_poi_extract.py --filter`, `osmpoi.rs` ist `compile_osmpoi.py`:
-Typ-Regeln, Attribut-String, Entdoppeln, Aufteilen in Zellen und Kacheln. Dazwischen
-kein Pickle — ein Befehl vom Extrakt bis zur Kartendatei:
+`poi.rs` ist `osm_poi_extract.py --filter` und bedient beide Layer — es behält, was
+`poi_type` annimmt, und alles mit `seamark:type`. Darauf sitzen `osmpoi.rs`
+(`compile_osmpoi.py`: Typ-Regeln, Attribut-String, Entdoppeln) und `osmpoint.rs`
+(`compile_osmpoint.py`: Kategorien, Farben, Topzeichen, Feuer-Strings, Sektoren).
+Dazwischen kein Pickle — ein Befehl vom Extrakt bis zur Kartendatei:
 
 ```bash
 ./target/release/teasi osmpoi osm_ref/great-britain-latest.osm.pbf \
     osm_ref/great-britain.poly build/GreatBritain_osmpoi.v20260918 20260918 --country=17
+./target/release/teasi osmpoint …    # dieselben Argumente
 ```
 
 Geprüft wird zweistufig. Erst die Kandidaten gegen das Python-Pickle, wie bei den
@@ -184,21 +188,29 @@ gleich sein.
 
 | | Kandidaten bitgleich | Records bitgleich |
 |---|---|---|
-| Dänemark | 88.978 Knoten, 18.596 Wege, 323 von 330 Relationen | 3692 von 3699 |
-| Großbritannien | 601.625 Knoten, 217.134 Wege, 1982 von 2142 Relationen | 15.498 von 15.619 |
+| osmpoi Dänemark | 88.978 Knoten, 18.596 Wege, 323 von 330 Relationen | 3693 von 3699 |
+| osmpoi Großbritannien | 601.625 Knoten, 217.134 Wege, 1982 von 2142 Relationen | 15.498 von 15.619 |
+| osmpoint Dänemark | | **128 von 128** |
+| osmpoint Großbritannien | | 353 von 354 |
 
 Alle Abweichungen sind die Flächen-Ringe von oben: Knoten und Wege stimmen zu 100 %,
-nur bei Multipolygonen liegt der Mittelpunkt um Meter daneben.
+nur bei Multipolygonen liegt der Mittelpunkt um Meter daneben. Beim britischen
+osmpoint ist es genau eine Marina, bei der das 8 m ausmacht.
 
 | | Python (nur die Extraktion) | Rust (PBF → Kartendatei) |
 |---|---:|---:|
-| Dänemark (494 MB PBF) | 3 min | 5,0 s |
-| Großbritannien (2,2 GB PBF) | 24 min | 29 s, 0,7 GB |
+| Dänemark (494 MB PBF) | 3 min | 5,2 s / 3,7 s |
+| Großbritannien (2,2 GB PBF) | 24 min | 35 s / 17 s |
 
 Der Abstand ist größer als bei den Adressen, weil `poi_type` in Python für jedes
 Objekt bis zu 43 `dict.get`-Aufrufe macht — über Großbritannien 370 Millionen. Hier
 werden die interessanten Tags beim Lesen einmal in ein Array geschrieben und die
-Regeln darauf geprüft.
+Regeln darauf geprüft. Nur für die Seezeichen hält `osm::TagMap` alle Tags, denn deren
+Schlüssel sind offen (`seamark:light:3:colour`).
+
+Zwei Kleinigkeiten, die beim Nachbauen auffielen: Pythons `round()` rundet die Hälfte
+zur geraden Seite (`f64::round_ties_even`), und `str.capitalize()` macht den Rest des
+Worts klein — aus `DGPS` wird `Dgps`.
 
 ## Zwei Fallen
 

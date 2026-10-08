@@ -102,8 +102,8 @@ Damit das Gerät eine neu gebaute Datei ohne Warnung annimmt, müssen Größe un
 
 In [rust/](rust/) wird die Werkzeugkette nach Rust portiert. Fertig sind die Hülle
 (PC1, Prüfsumme, rohes LZMA1, alle Record-Container, Schreiber, Suchindex), das Lesen
-von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und der erste Layer-Compiler
-(`osmpoi`, vom Extrakt direkt in die Kartendatei). Die Python-Werkzeuge bleiben die
+von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und die ersten zwei
+Layer-Compiler (`osmpoi` und `osmpoint`, vom Extrakt direkt in die Kartendatei). Die Python-Werkzeuge bleiben die
 Referenz; geprüft wird gegen sie:
 
 ```bash
@@ -116,9 +116,10 @@ cd rust && cargo build --release
 Alle 14.185 Records der dänischen Karte in 1,3 s zerlegt und bytegleich neu gebaut;
 Entschlüsseln ist 40- bis 70-mal schneller als in Python, Schreiben etwa 8-mal, die
 Adressextraktion 56-mal (Dänemark 270 s → 4,8 s). Der osmpoi-Layer für
-Großbritannien braucht 29 s statt 24 min allein für die Extraktion, und 15.498 seiner
-15.619 Records sind bytegleich mit der Python-Version. Die fünf übrigen Compiler
-fehlen noch, Details in [rust/README.md](rust/README.md).
+Großbritannien braucht 35 s statt 24 min allein für die Extraktion, und 15.498 seiner
+15.619 Records sind bytegleich mit der Python-Version; bei osmpoint sind es 353 von
+354 und für Dänemark alle 128. Die vier übrigen Compiler fehlen noch, Details in
+[rust/README.md](rust/README.md).
 
 ## Was hier nicht drin ist
 

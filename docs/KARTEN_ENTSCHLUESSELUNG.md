@@ -534,18 +534,20 @@ Eckpunkt und wiederholt ihn am Ende, und außen/innen entscheidet die Verschacht
 der Ringe, nicht die Member-Rolle. Ohne das lagen 4,3 von 5,0 Mio. britischen
 Adressen um Median 1,6 m daneben.
 
-Der erste Layer-Compiler ist portiert: `poi.rs` + `osmpoi.rs` bauen den osmpoi-Layer
-in einem Lauf aus dem PBF (Großbritannien 29 s statt 24 min allein für die
-Extraktion). Von 15.619 Records der britischen Karte sind 15.498 bytegleich mit der
-Python-Version; die Unterschiede sind Multipolygone mit sich berührenden Ringen, die
-libosmiums Zusammenbau anders aufteilt.
+Zwei Layer-Compiler sind portiert: `poi.rs` liest die Kandidaten für beide, `osmpoi.rs`
+und `osmpoint.rs` bauen die Dateien, alles in einem Lauf über das PBF (Großbritannien
+35 bzw. 17 s statt 24 min allein für die Extraktion). Von 15.619 osmpoi-Records der
+britischen Karte sind 15.498 bytegleich mit der Python-Version, von 354
+osmpoint-Records 353, und für Dänemark alle 128. Die Unterschiede sind Multipolygone
+mit sich berührenden Ringen, die libosmiums Zusammenbau anders aufteilt.
 
 ```bash
-./target/release/teasi osmpoi <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
+./target/release/teasi osmpoi  <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
+./target/release/teasi osmpoint <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi md5s <karte>   # auf beiden Dateien, dann diff
 ```
 
-Die übrigen Extraktoren und die fünf anderen Layer-Compiler sind noch nicht portiert.
+Die übrigen Extraktoren und die vier anderen Layer-Compiler sind noch nicht portiert.
 
 ---
 

@@ -297,3 +297,145 @@ fn poly_contains_counts_holes() {
     assert!(!teasi::poly::contains(&rings, 5.0, 5.0));
     assert!(!teasi::poly::contains(&rings, 11.0, 5.0));
 }
+
+// --------------------------------------------------------------------------
+// osmpoint (tools/compile_osmpoint.py); all expected values printed by it
+// --------------------------------------------------------------------------
+
+fn seamark(pairs: &[(&str, &str)]) -> teasi::osm::TagMap {
+    teasi::osm::TagMap::of(pairs.iter().copied())
+}
+
+/// cat, body colour, topmark, attribute string, label and the sectors.
+fn point(ty: &str, t: &teasi::osm::TagMap) -> (u32, u32, u32, String, String, usize) {
+    use teasi::osmpoint::*;
+    let ls = lights(t);
+    (
+        category(ty, t).unwrap(),
+        body_colour(ty, t),
+        topmark(t),
+        attributes(ty, t, &ls),
+        label(ty, t, &ls),
+        sectors(&ls).len(),
+    )
+}
+
+#[test]
+fn seamark_buoy_matches_python() {
+    let t = seamark(&[
+        ("seamark:type", "buoy_lateral"),
+        ("seamark:buoy_lateral:shape", "can"),
+        ("seamark:buoy_lateral:colour", "red"),
+        ("seamark:buoy_lateral:category", "port"),
+        ("seamark:topmark:shape", "cylinder"),
+        ("seamark:topmark:colour", "red"),
+        ("seamark:light:character", "Fl"),
+        ("seamark:light:colour", "red"),
+        ("seamark:light:period", "3"),
+        ("seamark:light:range", "4.5"),
+        ("seamark:name", "Buoy 7"),
+    ]);
+    let (cat, col, top, attrs, label, nsec) = point("buoy_lateral", &t);
+    assert_eq!((cat, col, top), (0x0A_0100, 0x190, 0x685));
+    assert_eq!(attrs, "19Port-hand Lateral Buoy|24Fl.R.3s4M");
+    assert_eq!(label, "5Fl.R.3s4M");
+    assert_eq!(nsec, 1); // a light without a sector still produces an entry
+}
+
+#[test]
+fn seamark_beacon_matches_python() {
+    let t = seamark(&[
+        ("seamark:type", "beacon_cardinal"),
+        ("seamark:beacon_cardinal:shape", "tower"),
+        ("seamark:beacon_cardinal:colour", "black;yellow"),
+        ("seamark:beacon_cardinal:colour_pattern", "horizontal"),
+        ("seamark:beacon_cardinal:category", "north"),
+        ("seamark:topmark:shape", "2 cones up"),
+        ("seamark:topmark:colour", "black"),
+    ]);
+    let (cat, col, top, attrs, label, nsec) = point("beacon_cardinal", &t);
+    assert_eq!((cat, col, top), (0x0A_0201, 0x4120, 0x48D));
+    assert_eq!(attrs, "19North Cardinal Beacon");
+    assert_eq!((label.as_str(), nsec), ("", 0));
+}
+
+#[test]
+fn seamark_light_sectors_match_python() {
+    let t = seamark(&[
+        ("seamark:type", "light_major"),
+        ("seamark:light:1:colour", "white"),
+        ("seamark:light:1:character", "Oc"),
+        ("seamark:light:1:period", "12"),
+        ("seamark:light:1:sector_start", "30"),
+        ("seamark:light:1:sector_end", "120"),
+        ("seamark:light:1:range", "12"),
+        ("seamark:light:2:colour", "red"),
+        ("seamark:light:2:character", "Oc"),
+        ("seamark:light:2:period", "12"),
+        ("seamark:light:2:sector_start", "120"),
+        ("seamark:light:2:sector_end", "200"),
+        ("seamark:light:2:range", "9"),
+        ("seamark:light:category", "floodlight"),
+        ("seamark:fog_signal:category", "horn"),
+        ("seamark:fog_signal:period", "30.0"),
+        ("seamark:radar_transponder:category", "racon"),
+        ("seamark:radar_transponder:group", "T"),
+    ]);
+    let (cat, _, _, attrs, label, _) = point("light_major", &t);
+    assert_eq!(cat, 0x09_0003);
+    assert_eq!(attrs, "19Flood light major|21Racon(T)|23Horn30s|24Oc.WR.12s9-12M");
+    assert_eq!(label, "0Horn30s|0Racon(T)|5Oc.WR.12s9-12M");
+    let secs = teasi::osmpoint::sectors(&teasi::osmpoint::lights(&t));
+    assert_eq!(secs.len(), 2);
+    assert_eq!((secs[0].0, secs[0].1, secs[0].2, secs[0].3), (1, 238.9, 341.3, 370));
+    assert_eq!(secs[0].4, "Oc.W.12s");
+    assert_eq!((secs[1].1, secs[1].2), (341.3, 22.7)); // wraps past north
+}
+
+#[test]
+fn seamark_texts_match_python() {
+    // several categories at once: unknown combination falls back to 3
+    let t = seamark(&[
+        ("seamark:type", "harbour"),
+        ("seamark:harbour:category", "marina;fishing"),
+        ("seamark:name", "Esbjerg"),
+        ("phone", "+45 1"),
+        ("website", "https://x"),
+    ]);
+    let (cat, _, _, attrs, _, _) = point("harbour", &t);
+    assert_eq!(cat, 0x09_0306);
+    assert_eq!(attrs, "01https://x|02+45 1|19- Yacht harbour/marina\n- Fishing harbour\n");
+
+    let t = seamark(&[("seamark:type", "rock")]);
+    assert_eq!(point("rock", &t).3, "19Rock|45submerged");
+
+    let t = seamark(&[
+        ("seamark:type", "signal_station_traffic"),
+        ("seamark:signal_station_traffic:category", "port_control"),
+    ]);
+    let (cat, _, _, attrs, label, _) = point("signal_station_traffic", &t);
+    assert_eq!(cat, 0x0C_000F);
+    assert_eq!(attrs, "19Traffic Signal Station: Port Control");
+    assert_eq!(label, "(Port Control)");
+}
+
+#[test]
+fn osmpoint_record_round_trip() {
+    use teasi::layers::{build_osmpoint, parse_osmpoint, u16enc, PointObj, PointRec, Sector};
+    let label = u16enc("Oc.W.12s");
+    let obj = PointObj {
+        s: vec![0, 7, 0x0A_0100, 0x1234, 0x190, 0x685, 0, 0, 0, 0, 1, 0],
+        name: u16enc("Buoy 7"),
+        attrs: Vec::new(),
+        label: Vec::new(),
+        sectors: vec![Sector {
+            w: vec![1, 2389, 3413, 370],
+            a: 0,
+            len: label.len() as u32,
+            label,
+        }],
+    };
+    let rec = PointRec { hdr: vec![0x30, 19, 0, 1, 0], objs: vec![obj] };
+    let raw = build_osmpoint(&rec);
+    assert_eq!(parse_osmpoint(&raw).unwrap(), rec);
+}

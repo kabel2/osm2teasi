@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use crate::layers::{build_osmpoi, PoiItem, LAYER_OSMPOI};
+use crate::poi::Cand;
 use crate::poly::{self, Ring};
 use crate::writer::{self, Areas, Meta, TileContent};
 
@@ -332,28 +333,12 @@ pub fn attributes(t: &Tags) -> String {
 // collecting: position, country boundary, de-duplication
 // --------------------------------------------------------------------------
 
-/// One POI candidate as the extractor hands it over.
-#[derive(Clone, Debug)]
-pub struct Cand {
-    /// 'n' node, 'w' way, 'r' multipolygon relation; nodes sort first and so
-    /// win the de-duplication
-    pub kind: char,
-    pub id: i64,
+/// What this layer takes from an object's tags.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoiFields {
     pub typ: u8,
-    /// mean of the object's points (a node's position for nodes)
-    pub x: f64,
-    pub y: f64,
-    /// area centroid of a closed way, used in preference to the mean
-    pub centre: Option<(f64, f64)>,
     pub name: String,
     pub attrs: String,
-}
-
-impl Cand {
-    /// Ways and relations share one centre rule and sort after the nodes.
-    pub fn way(&self) -> bool {
-        self.kind != 'n'
-    }
 }
 
 /// One POI as it goes into the chart.
@@ -367,14 +352,15 @@ pub struct Poi {
 }
 
 /// Python's `round()`: halfway values go to the even side.
-fn round_even(v: f64) -> i64 {
+pub fn round_even(v: f64) -> i64 {
     v.round_ties_even() as i64
 }
 
 /// Sort, drop what is outside the boundary, then de-duplicate.
-pub fn collect(cands: Vec<Cand>, area: Option<&[Ring]>) -> Vec<Poi> {
+pub fn collect(cands: &[Cand], area: Option<&[Ring]>) -> Vec<Poi> {
     let mut pois: Vec<(bool, i64, u8, i64, i64, String, String)> = Vec::with_capacity(cands.len());
     for c in cands {
+        let Some(f) = c.poi.as_ref() else { continue };
         // only a way uses its area centroid; a relation keeps the mean
         let (x, y) = match (c.kind, c.centre) {
             ('w', Some(p)) => p,
@@ -386,7 +372,7 @@ pub fn collect(cands: Vec<Cand>, area: Option<&[Ring]>) -> Vec<Poi> {
                 continue;
             }
         }
-        pois.push((c.way(), c.id, c.typ, x, y, c.name, c.attrs));
+        pois.push((c.way(), c.id, f.typ, x, y, f.name.clone(), f.attrs.clone()));
     }
     pois.sort();
     // same type and name within DEDUP units of an earlier one: drop it

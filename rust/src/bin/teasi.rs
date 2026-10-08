@@ -23,7 +23,8 @@ usage: teasi <command> [arguments]
                              (out: canonical dump to compare with Python)
   poi <file.osm.pbf> <out>   POI candidates as a canonical dump
   osmpoi <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD] [--country=N]
-                             compile the osmpoi layer (country 4 = Denmark,
+  osmpoint <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD] [--country=N]
+                             compile that layer (country 4 = Denmark,
                              17 = United Kingdom)
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
@@ -389,22 +390,23 @@ fn poi(path: &str, dst: &str) -> Result<bool> {
     let cands = teasi::poi::extract(path, &|s| println!("  {}", s))?;
     let mut lines: Vec<String> = cands
         .iter()
-        .map(|c| {
+        .filter_map(|c| {
+            let f = c.poi.as_ref()?;
             let centre = match c.centre {
                 Some((x, y)) => format!("{}:{}", bits(x), bits(y)),
                 None => "-".to_string(),
             };
-            format!(
+            Some(format!(
                 "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 c.kind,
                 c.id,
-                c.typ,
+                f.typ,
                 bits(c.x),
                 bits(c.y),
                 centre,
-                flat(Some(&c.name)),
-                flat(Some(&c.attrs))
-            )
+                flat(Some(&f.name)),
+                flat(Some(&f.attrs))
+            ))
         })
         .collect();
     lines.sort();
@@ -419,10 +421,12 @@ fn poi(path: &str, dst: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Compile the osmpoi layer from a .osm.pbf.  Port of tools/compile_osmpoi.py.
-fn osmpoi(args: &[String], country: u32) -> Result<bool> {
+/// Compile the osmpoi or osmpoint layer from a .osm.pbf.  Ports of
+/// tools/compile_osmpoi.py and tools/compile_osmpoint.py; both read the same
+/// candidates, so one pass over the file serves either.
+fn compile_poi(layer: &str, args: &[String], country: u32) -> Result<bool> {
     if args.len() < 3 {
-        bail!("usage: teasi osmpoi <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]");
+        bail!("usage: teasi {} <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]", layer);
     }
     let (src, area, dst) = (&args[0], &args[1], &args[2]);
     let date = match args.get(3) {
@@ -433,13 +437,21 @@ fn osmpoi(args: &[String], country: u32) -> Result<bool> {
     let cands = teasi::poi::extract(src, &|s| println!("  {}", s))?;
     let n = cands.len();
     let rings = teasi::poly::load(area)?;
-    let pois = teasi::osmpoi::collect(cands, Some(&rings));
-    let d = teasi::osmpoi::build(&pois, date.as_bytes(), country, &chart::device())?;
+    let (what, kept, d) = if layer == "osmpoint" {
+        let pts = teasi::osmpoint::collect(&cands, Some(&rings));
+        let d = teasi::osmpoint::build(&pts, date.as_bytes(), country, &chart::device())?;
+        ("seamarks", pts.len(), d)
+    } else {
+        let pois = teasi::osmpoi::collect(&cands, Some(&rings));
+        let d = teasi::osmpoi::build(&pois, date.as_bytes(), country, &chart::device())?;
+        ("POIs", pois.len(), d)
+    };
     std::fs::write(dst, &d)?;
     println!(
-        "{} candidates, {} POIs, {} B -> {} in {:.1} s",
+        "{} candidates, {} {}, {} B -> {} in {:.1} s",
         n,
-        pois.len(),
+        kept,
+        what,
         d.len(),
         dst,
         t0.elapsed().as_secs_f32()
@@ -503,12 +515,12 @@ fn run() -> Result<bool> {
             }
             poi(&args[1], &args[2])
         }
-        "osmpoi" => {
+        "osmpoi" | "osmpoint" => {
             let country = match opt("country") {
                 Some(v) => v.parse().context("--country")?,
                 None => 4,
             };
-            osmpoi(&args[1..], country)
+            compile_poi(&args[0], &args[1..], country)
         }
         "check" => {
             let mut ok = true;

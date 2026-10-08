@@ -209,6 +209,37 @@ pub fn fsum<I: Iterator<Item = f64>>(xs: I) -> f64 {
     s + c
 }
 
+/// All tags of one object, in file order.  Only needed where the set of keys is
+/// open-ended, as in `seamark:light:3:colour`; everything else reads a fixed
+/// set of keys and does not pay for this.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TagMap(Vec<(Box<str>, Box<str>)>);
+
+impl TagMap {
+    pub fn of<'a, I: Iterator<Item = (&'a str, &'a str)>>(it: I) -> Self {
+        TagMap(it.map(|(k, v)| (k.into(), v.into())).collect())
+    }
+
+    /// The value of `key`; the last one wins, as in a Python dict.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.0.iter().rev().find(|(k, _)| &**k == key).map(|(_, v)| &**v)
+    }
+
+    /// Like `t.get(k)` where an empty value counts as absent.
+    pub fn non_empty(&self, key: &str) -> Option<&str> {
+        self.get(key).filter(|v| !v.is_empty())
+    }
+
+    /// First of `keys` with a non-empty value.
+    pub fn first(&self, keys: &[&str]) -> Option<&str> {
+        keys.iter().find_map(|k| self.non_empty(k))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().map(|(k, v)| (&**k, &**v))
+    }
+}
+
 /// Mean of the points, the way Python's `sum(...) / len(...)` computes it.
 pub fn mean(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
     if pts.is_empty() {

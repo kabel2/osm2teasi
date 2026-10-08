@@ -7,6 +7,7 @@ pub mod layers;
 pub mod lzma;
 pub mod osm;
 pub mod osmpoi;
+pub mod osmpoint;
 pub mod pc1;
 pub mod poi;
 pub mod poly;

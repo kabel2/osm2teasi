@@ -1,32 +1,71 @@
-//! POI candidates from a .osm.pbf: tagged nodes, tagged ways and tagged
-//! multipolygon relations.  Port of tools/osm_poi_extract.py --filter, which
-//! keeps exactly the objects osmpoi::poi_type accepts.
+//! POI and seamark candidates from a .osm.pbf: tagged nodes, tagged ways and
+//! tagged multipolygon relations.  Port of tools/osm_poi_extract.py --filter,
+//! which keeps the objects osmpoi::poi_type accepts plus everything carrying
+//! `seamark:type` -- the first set feeds the osmpoi layer, the second osmpoint.
 //!
 //! Three passes, as in addr.rs: a relation needs its member ways, those need
 //! their nodes, and the PBF has nodes first, relations last.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use osmpbf::PrimitiveBlock;
 
-use crate::osm::{area_centre, area_rings, mean, par_blocks, xy_dm, NodeIndex};
-use crate::osmpoi::{attributes, poi_type, tags_of, Cand};
+use crate::osm::{area_centre, area_rings, mean, par_blocks, xy_dm, NodeIndex, TagMap};
+use crate::osmpoi::{attributes, poi_type, tags_of, PoiFields, Tags, K};
+
+/// One object with everything the two layers need of it.
+#[derive(Clone, Debug)]
+pub struct Cand {
+    /// 'n' node, 'w' way, 'r' multipolygon relation; nodes sort first and so
+    /// win the de-duplication
+    pub kind: char,
+    pub id: i64,
+    /// mean of the object's points (a node's position for nodes)
+    pub x: f64,
+    pub y: f64,
+    /// area centroid of a closed way, used in preference to the mean
+    pub centre: Option<(f64, f64)>,
+    /// set when the object is a POI for the osmpoi layer
+    pub poi: Option<PoiFields>,
+    /// all tags, kept only for objects with `seamark:type`
+    pub seamark: Option<TagMap>,
+}
+
+impl Cand {
+    /// Ways and relations share one centre rule and sort after the nodes.
+    pub fn way(&self) -> bool {
+        self.kind != 'n'
+    }
+}
+
+/// What the two layers take from an object's tags, or nothing if neither wants it.
+fn fields(t: &Tags, node: bool, raw: impl Fn() -> TagMap) -> Option<(Option<PoiFields>, Option<TagMap>)> {
+    let poi = poi_type(t, node).map(|typ| PoiFields {
+        typ,
+        name: t.name().to_string(),
+        attrs: attributes(t),
+    });
+    let seamark = t.get(K::SeamarkType).map(|_| raw());
+    if poi.is_none() && seamark.is_none() {
+        return None;
+    }
+    Some((poi, seamark))
+}
 
 /// A way or relation we still need the geometry of.
 #[derive(Clone, Debug)]
 struct Cand2 {
     id: i64,
-    typ: u8,
-    name: String,
-    attrs: String,
+    poi: Option<PoiFields>,
+    seamark: Option<TagMap>,
     /// node ids (way) or member way ids (relation)
     refs: Vec<i64>,
 }
 
 #[derive(Default)]
 struct Pass2 {
-    /// ways that are POIs themselves
+    /// ways that are candidates themselves
     ways: Vec<Cand2>,
     /// node ids of the ways a wanted relation is made of
     members: Vec<(i64, Vec<i64>)>,
@@ -51,7 +90,7 @@ pub fn centroid(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
     Some((x0 + cx / (3.0 * a), y0 + cy / (3.0 * a)))
 }
 
-/// Everything osmpoi needs from the file.
+/// Everything the osmpoi and osmpoint layers need from the file.
 pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
     let clock = std::time::Instant::now();
     let lap = || {
@@ -59,7 +98,7 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
         move |s: String| format!("{} [{:.1} s]", s, clock.elapsed().as_secs_f32() - t)
     };
 
-    // pass 1: multipolygon relations that are POIs
+    // pass 1: multipolygon relations that are candidates
     let since = lap();
     let rels: Vec<Cand2> = par_blocks(
         path,
@@ -71,7 +110,9 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
                     if !t.multipolygon() {
                         continue;
                     }
-                    let Some(typ) = poi_type(&t, false) else { continue };
+                    let Some((poi, seamark)) = fields(&t, false, || TagMap::of(r.tags())) else {
+                        continue;
+                    };
                     // every way member, once: libosmium ignores the roles too, and
                     // a way listed twice contributes its ring only once
                     let mut seen = HashSet::new();
@@ -82,13 +123,7 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
                         .filter(|id| seen.insert(*id))
                         .collect();
                     if !refs.is_empty() {
-                        acc.push(Cand2 {
-                            id: r.id(),
-                            typ,
-                            name: t.name().to_string(),
-                            attrs: attributes(&t),
-                            refs,
-                        });
+                        acc.push(Cand2 { id: r.id(), poi, seamark, refs });
                     }
                 }
             }
@@ -99,9 +134,13 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
         },
     )?;
     let wanted_ways: HashSet<i64> = rels.iter().flat_map(|r| r.refs.iter().copied()).collect();
-    log(&since(format!("pass 1: {} POI relations, {} member ways", rels.len(), wanted_ways.len())));
+    log(&since(format!(
+        "pass 1: {} relations, {} member ways",
+        rels.len(),
+        wanted_ways.len()
+    )));
 
-    // pass 2: ways that are POIs, plus the member ways of those relations
+    // pass 2: ways that are candidates, plus the member ways of those relations
     let since = lap();
     let p2 = par_blocks(
         path,
@@ -111,22 +150,16 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
                 for w in group.ways() {
                     let member = wanted_ways.contains(&w.id());
                     let t = tags_of(w.tags());
-                    let typ = poi_type(&t, false);
-                    if !member && typ.is_none() {
+                    let want = fields(&t, false, || TagMap::of(w.tags()));
+                    if !member && want.is_none() {
                         continue; // the common case: do not even collect the nodes
                     }
                     let refs: Vec<i64> = w.refs().collect();
                     if member {
                         acc.members.push((w.id(), refs.clone()));
                     }
-                    if let Some(typ) = typ {
-                        acc.ways.push(Cand2 {
-                            id: w.id(),
-                            typ,
-                            name: t.name().to_string(),
-                            attrs: attributes(&t),
-                            refs,
-                        });
+                    if let Some((poi, seamark)) = want {
+                        acc.ways.push(Cand2 { id: w.id(), poi, seamark, refs });
                     }
                 }
             }
@@ -137,9 +170,13 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
             a
         },
     )?;
-    log(&since(format!("pass 2: {} POI ways, {} member ways found", p2.ways.len(), p2.members.len())));
+    log(&since(format!(
+        "pass 2: {} ways, {} member ways found",
+        p2.ways.len(),
+        p2.members.len()
+    )));
 
-    // pass 3: POI nodes and the coordinates the ways need
+    // pass 3: the candidates that are nodes and the coordinates the ways need
     let since = lap();
     let mut ids: Vec<i64> = Vec::new();
     for w in &p2.ways {
@@ -154,30 +191,25 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
         || (Vec::new(), Vec::new()),
         |acc: &mut (Vec<Cand>, Vec<(i64, i32, i32)>), block: &PrimitiveBlock| {
             let mut probe = index.probe();
-            let mut one = |id: i64, lon: i32, lat: i32, t: &crate::osmpoi::Tags| {
-                if probe.wants(id) {
-                    acc.1.push((id, lon, lat));
-                }
-                if let Some(typ) = poi_type(t, true) {
-                    let (x, y) = xy_dm(lon, lat);
-                    acc.0.push(Cand {
-                        kind: 'n',
-                        id,
-                        typ,
-                        x,
-                        y,
-                        centre: None,
-                        name: t.name().to_string(),
-                        attrs: attributes(t),
+            for group in block.groups() {
+                let mut one = |id: i64, lon: i32, lat: i32, t: &Tags, raw: &dyn Fn() -> TagMap| {
+                    if probe.wants(id) {
+                        acc.1.push((id, lon, lat));
+                    }
+                    if let Some((poi, seamark)) = fields(t, true, || raw()) {
+                        let (x, y) = xy_dm(lon, lat);
+                        acc.0.push(Cand { kind: 'n', id, x, y, centre: None, poi, seamark });
+                    }
+                };
+                for n in group.nodes() {
+                    one(n.id(), n.decimicro_lon(), n.decimicro_lat(), &tags_of(n.tags()), &|| {
+                        TagMap::of(n.tags())
                     });
                 }
-            };
-            for group in block.groups() {
-                for n in group.nodes() {
-                    one(n.id(), n.decimicro_lon(), n.decimicro_lat(), &tags_of(n.tags()));
-                }
                 for n in group.dense_nodes() {
-                    one(n.id(), n.decimicro_lon(), n.decimicro_lat(), &tags_of(n.tags()));
+                    one(n.id(), n.decimicro_lon(), n.decimicro_lat(), &tags_of(n.tags()), &|| {
+                        TagMap::of(n.tags())
+                    });
                 }
             }
         },
@@ -191,7 +223,7 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
         index.set(*id, *lon, *lat);
     }
     log(&since(format!(
-        "pass 3: {} POI nodes, {} of {} way nodes located",
+        "pass 3: {} nodes, {} of {} way nodes located",
         nodes.len(),
         index.len() - index.missing(),
         index.len()
@@ -210,18 +242,17 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
         out.push(Cand {
             kind: 'w',
             id: w.id,
-            typ: w.typ,
             x,
             y,
             centre: centroid(&pts),
-            name: w.name.clone(),
-            attrs: w.attrs.clone(),
+            poi: w.poi.clone(),
+            seamark: w.seamark.clone(),
         });
     }
     let n_ways = out.len() - n_nodes;
 
-    // relations: the mean over the points of all assembled rings
-    let members: std::collections::HashMap<i64, &Vec<i64>> =
+    // relations: the mean over the points of all outer rings
+    let members: HashMap<i64, &Vec<i64>> =
         p2.members.iter().map(|(id, refs)| (*id, refs)).collect();
     let mut open = 0usize;
     for r in &rels {
@@ -234,12 +265,11 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
         out.push(Cand {
             kind: 'r',
             id: r.id,
-            typ: r.typ,
             x,
             y,
             centre: None,
-            name: r.name.clone(),
-            attrs: r.attrs.clone(),
+            poi: r.poi.clone(),
+            seamark: r.seamark.clone(),
         });
     }
     log(&since(format!(
