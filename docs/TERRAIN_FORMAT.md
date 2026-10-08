@@ -289,7 +289,7 @@ agree, in Norway 12,736 of 12,789. The JPEGs are baseline with JFIF and Exif (96
 and IJG quality 80. The records of the JPEGs come in cell order, followed by the elevation
 records.
 
-**Compiler** `tools/compile_terrain.py` (2026-09-19):
+**Compiler** `teasi terrain` (2026-09-19):
 - Without `--land`/`--area` every JPEG cell stays empty; the elevation profile already works
   like that.
 - With `--land`/`--area` a 2048×2048 image is produced per region:
@@ -301,31 +301,29 @@ records.
   - The image is cut into 256-pixel tiles, and the pyramid levels are added (Lanczos).
 - Images go to every cell that touches the polygon or contains land.
 - Elevation tiles exist only for cells with land (height > 0).
-- The heights are read bilinearly from the `dem_heights.py` grid. `a1` is the minimum and
+- The heights are read bilinearly from the `tools/dem_heights.py` grid. `a1` is the minimum and
   `a0 = 65535 // span` in 1/6 m.
-- Encoding is done with OpenJPEG (Pillow): `irreversible`, 6 resolutions, 64×64, LRCP,
+- Encoding is done with OpenJPEG (the same parameters Pillow's plugin sets):
+  `irreversible`, 6 resolutions, 64×64, LRCP,
   ratio 50. COD and SIZ are identical with the original, and the error is around 0.5 m RMS.
   The JP2 boxes in front are copied from the original.
 - The blob is `encrypt_blob` of a random key, as in the vector layers.
 
-### In Rust
-
-`rust/src/terrain.rs` does the same without a pickle; `rust/src/raster.rs` reproduces the
-three Pillow pieces (the polygon filler, the Lanczos resize and the hillshade — all three
-bit-identical) and calls OpenJPEG for the elevation tiles. See
-[../rust/README.md](../rust/README.md).
+`raster.rs` reproduces the three pieces of Pillow this needs (the polygon filler, the
+Lanczos resize and the hillshade — all three bit-identical, line by line from the C sources)
+and calls OpenJPEG for the elevation tiles. See [../rust/README.md](../rust/README.md).
 
 ```bash
-./target/release/teasi terrain --country=17 \
+teasi terrain --country=17 \
     --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
     --area=osm_ref/great-britain-latest.osm.pbf \
     build/gb/dem.bin osm_ref/great-britain.poly \
     build/gb/GreatBritain_terrain.v20260919 20260919      # 1:24, 7.9 GB
 ```
 
-The comparison is done with `rust/scripts/terrain_compare.py`, not with `teasi check` — the
-layer has no slot areas. For Denmark as for Great Britain **every elevation tile** (1034 and
-1999 respectively) is byte-identical with the Python version, down to one byte: OpenJPEG
+The two implementations were compared region by region, not with `teasi check` — the layer
+has no slot areas. For Denmark as for Great Britain **every elevation tile** (1034 and 1999
+respectively) came out byte-identical with the Python output, down to one byte: OpenJPEG
 writes its own version into the codestream's comment marker. The map images go through a
 different JPEG encoder (`jpeg-encoder` instead of libjpeg-turbo); about half of them are
 pixel-identical anyway, the mean deviation is 0.025 out of 255, and the files are three
@@ -356,5 +354,5 @@ hundred-thousandths smaller.
 4. Header fields 0x50–0x70 (in terrain `0x6C = 4201`, among others).
 5. Document `settings/customroutecache*.rti` (magic `B18EDA7A`).
 
-Scripts for rendering: `attic/terrain_render/` (`render_final.py`, `region_full.py`,
-`tail_render.py`, `overview_fix.py`; output in `terrain_tiles/`).
+The one-off scripts that rendered the original regions into image tiles for inspection are
+in the history up to commit `fc17505`.

@@ -21,7 +21,7 @@ public class AllocHunt extends GhidraScript {
             if (n.equals("Ordinal_1095")) opNew = f;
             if (n.equals("Ordinal_1094")) opDel = f;
         }
-        if (opNew == null) { println("Ordinal_1095 nicht gefunden"); return; }
+        if (opNew == null) { println("Ordinal_1095 not found"); return; }
         println("### operator new @ " + opNew.getEntryPoint() + "  delete @ "
                 + (opDel == null ? "?" : opDel.getEntryPoint()));
 
@@ -64,7 +64,7 @@ public class AllocHunt extends GhidraScript {
             }
             if (dynamic) dyn.add(f);
         }
-        println("### funktionen mit dynamischem new: " + dyn.size()
+        println("### functions using dynamic new: " + dyn.size()
                 + "  (konstante: " + constCount + ")");
         Collections.sort(dyn, new Comparator<Function>() {
             public int compare(Function a, Function b) {

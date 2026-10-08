@@ -1,12 +1,11 @@
 //! The osmarea layer: land use, water and sea (OSMAREA_FORMAT.md).
-//! Port of tools/compile_osmarea.py, with GEOS doing the geometry.
+//! GEOS does the geometry.
 //!
 //! One deliberate difference to the first Python version: the areas are
 //! processed in the order of their osmium id.  Python used to take them in the
 //! order the extractor wrote them, which is the order libosmium happens to
 //! flush its buffers in -- that order decides which polygon enters a union
 //! first and so shows up in the output.  Sorting makes the layer reproducible
-//! (tools/compile_osmarea.py sorts too now).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -576,7 +575,7 @@ pub fn boundary_at(rings: &[crate::poly::Ring], div: f64) -> Result<Geom> {
 
 /// Build the whole layer.  `orig` supplies the sea outside the boundary and the
 /// tiles that lie completely outside it; `land` replaces the coastline sea with
-/// the worldwide land polygons (land_extract.py) for countries without one.
+/// the worldwide land polygons (`land.rs`) for countries without one.
 #[allow(clippy::too_many_arguments)]
 pub fn build(
     ex: &Extract,

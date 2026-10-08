@@ -1,12 +1,12 @@
 //! The ta layer: address search -- places, streets and house numbers
-//! (TA_FORMAT.md).  Port of tools/compile_ta.py.
+//! (TA_FORMAT.md).
 //!
 //! Records: D (32x32) with the street pieces, A (4x4) with one sub element per
 //! place group and the street names grouped by place, and the country-wide
 //! search index behind the records of the last tile (`ta_index.rs`).
 //!
-//! Two deliberate differences to the first Python version, both for
-//! reproducibility (tools/compile_ta.py does the same now):
+//! Two deliberate differences to the first implementation, both for
+//! reproducibility:
 //!   * the addresses, places and interpolation ways are sorted canonically --
 //!     the extractor hands them over in libosmium's order, which decides
 //!     `Counter` ties and float summation order and is not reproducible;

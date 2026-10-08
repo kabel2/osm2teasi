@@ -1,7 +1,7 @@
 # osmpoint format (`Denmark_osmpoint.v20210916`)
 
-As of 2026-09-18. **Fully understood**: the parser and builder in `tools/layers.py` produce
-all 110 records **byte-identically** (round-trip test).
+As of 2026-09-18. **Fully understood**: the parser and builder in `layers.rs` produce all
+110 records **byte-identically** (`teasi check`).
 
 Content: **seamarks from OpenSeaMap** (`seamark:*`) — buoys, beacons, lights with sectors,
 harbours, wind turbines, rocks, wrecks and so on. The Danish file: 5211 objects in 110
@@ -36,7 +36,7 @@ There is no padding at the end: the record size (`pltx`) comes out exactly.
 
 **Transposed** means byte 0 of all n structs comes first, then byte 1 of all structs, and
 so on. The firmware undoes this after decompressing
-(`tools/layers.py: untranspose/transpose`).
+(`layers.rs: transposed/put_transposed`).
 
 ### Object struct (0x30 B = 12 × u32, after transposing back)
 
@@ -130,7 +130,7 @@ station, `4` = clearance height. Several entries are separated by `|`.
 ## Category `[2]`
 
 `[2] = group << 16 | subkind << 8 | class`, fully resolved by matching against OSM (99.6 %
-hit rate, rules in `category()` of `tools/compile_osmpoint.py`):
+hit rate, rules in `category()` of `osmpoint.rs`):
 
 - **Class** (byte 0) from `seamark:type`: buoy 0, beacon 1, light 3, landmark 4, harbour 6,
   anchorage 7, mooring 8, wreck 9, rock 0xC, bridge 0xD, radio station 0xE, signal station
@@ -170,8 +170,7 @@ The most common values in Denmark:
 | `0x0E0007` | anchorage | 17 |
 | `0x0E000D` | fixed bridge | 1 |
 
-`tools/layers.py` together with `collections.Counter` over `o["cat"]` gives the full list
-(55 values) with examples.
+Counting `[2]` over the whole file gives the full list (55 values) with examples.
 
 ## Colours `[4]` and topmarks `[5]`
 
@@ -225,14 +224,13 @@ order, presumably).
 ## Building it from OSM
 
 ```bash
-.venv/bin/python tools/osm_poi_extract.py osm_ref/denmark-latest.osm.pbf build/ref/poi_latest.pkl   # as for osmpoi
-.venv/bin/python tools/compile_osmpoint.py build/ref/poi_latest.pkl osm_ref/denmark.poly \
-    build/<dir>/Denmark_osmpoint.v20210916 [YYYYMMDD]
+teasi osmpoint osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    build/<dir>/Denmark_osmpoint.v20210916 [YYYYMMDD]      # --country=N, default 4
 ```
 
-In Rust, `teasi osmpoint <pbf> <poly> <out> [YYYYMMDD] --country=N` does both in one run
-without a pickle; for Denmark all 128 records are byte-identical, for Great Britain 353 of
-354 (`rust/README.md`, stage 3).
+`poi.rs` reads the candidates (the same pass serves osmpoi) and `osmpoint.rs` compiles them;
+for Denmark all 128 records come out byte-identical, for Great Britain all 354
+(`rust/README.md`, stage 3).
 
 Every object with a `seamark:type` that has a category is taken (not `small_craft_facility`,
 `pile`, `cable_submarine` or `navigation_line`, for instance), inside the Geofabrik

@@ -1,16 +1,15 @@
-# Nur Code und Dokumentation gehören ins Repo.
+# Only code and documentation belong in this repository.
 __pycache__/
 *.pyc
 rust/target/
 .venv/
 venv/
 
-# Arbeitsdaten (zu groß, fremde Lizenzen, gerätegebunden)
+# Working data (too large, other people's licences, device-bound)
 /build/
 /charts/
 /osm_ref/
 /firmware/
-/terrain_tiles/
 /dem/
 *.osm.pbf
 *.poly

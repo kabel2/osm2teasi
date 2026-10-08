@@ -1,9 +1,9 @@
 # osm format (`Denmark_osm.v20210916`)
 
-As of 2026-09-18. **Container fully understood**: `tools/layers.py` rebuilds all 5878 records
+As of 2026-09-18. **Container fully understood**: `layers.rs` rebuilds all 5878 records
 byte-identically (A 161, B 406, C 105, D 5206). Classes, flags and line types were assigned
 by matching against OSM (see below). Only individual fields are open, see "Open questions".
-**Compiler:** `tools/compile_osm.py` builds the layer from OSM, see "Building it from OSM".
+**Compiler:** `teasi osm` builds the layer from OSM, see "Building it from OSM".
 
 Content: the **street and path network from OSM** (geometry, classes, names, lengths, nodes
 for routing), plus rivers and other lines, a directory of street and place names for the
@@ -46,7 +46,7 @@ n × u32                points, packed as (v << 16) | u, relative to the NW corn
 For lines (osm, ta) `hi == n`. For areas (osmarea) `hi` is a level of detail (9–14), see
 [OSMAREA_FORMAT.md](OSMAREA_FORMAT.md). The division into parts comes out exactly in all
 ~520,000 geometries checked (osmarea completely, osm-D every 5th record;
-`geometry_parts()` in `tools/layers.py`). In that sample only 483 of 474,575 streets consist
+`geometry_parts()` in `layers.rs`). In that sample only 483 of 474,575 streets consist
 of more than one part.
 
 Streets are cut at the **margin** of the sub-cell (the cell ± 512): an edge near a cell
@@ -89,7 +89,7 @@ two of them lies exactly one edge. **Motorways** (class 0) and a few other edges
 **Order:** the a1 entries of a record are sorted **ascending by class** (in every record),
 and within a class mostly by name.
 
-**Match against OSM** (Geofabrik extract `denmark-220101.osm.pbf`, `tools/osm_extract.py`):
+**Match against OSM** (Geofabrik extract `denmark-220101.osm.pbf`, `teasi ways`):
 the vertices of the edges are **exactly OSM nodes** (after subtracting the margin of 512, see
 "Coordinates in D records"). 2,298,873 of 2,339,000 edges (98.3 %) can be assigned to an OSM
 way that way, 2,092,000 of them with every point. The edge almost always runs in the
@@ -252,7 +252,7 @@ directions).
 |---|---|
 | `[0]` | bits 0–19 = **length** (as in `a1[7]`), bit 20 = 0, bits 21–24 = **street class** (as in `a1[7] >> 27`), bits 25–29 = **way category** (see below), bit 30 = **passable in this direction** (0 for a one-way against the direction), bit 31 = 1 |
 | `[1]` | **flags**, identical with `a1[6]` (99.9 %) |
-| `[2]` | **ascent in cm** in the direction of travel (the sum of the height gains); the router's cost is `weight₁·length + weight₂·[2]`. From `[2]`(u→v) − `[2]`(v→u) = h(v) − h(u) the node heights can be reconstructed, and 97.5 % of the edges agree to within 50 cm (`tools/osm_heights.py`) |
+| `[2]` | **ascent in cm** in the direction of travel (the sum of the height gains); the router's cost is `weight₁·length + weight₂·[2]`. From `[2]`(u→v) − `[2]`(v→u) = h(v) − h(u) the node heights can be reconstructed, and 97.5 % of the edges agree to within 50 cm |
 | `[3]` | **target node**: bits 25–31 = dx + 64, bits 18–24 = dy + 64 (the offset of the target's 8×8 cell), bits 0–17 = the node index there. `0x81…` = the same cell |
 
 Way category (bits 25–29, matched against OSM): 18 = trunk/primary/secondary (plus the
@@ -297,15 +297,13 @@ Likewise `parse_a`/`build_a`, `parse_b`/`build_b`, `parse_c`/`build_c`.
 ## Building it from OSM
 
 ```bash
-.venv/bin/python tools/osm_extract.py osm_ref/denmark-latest.osm.pbf build/ref/ways_latest.pkl   # ~2 min
-.venv/bin/python tools/osm_heights.py 2013021200000368/7/943/20317/Denmark_osm.v20210916 \
-    build/ref/heights.pkl                                   # once, ~5 min (scipy)
-.venv/bin/python tools/compile_osm.py --heights=build/ref/heights.pkl build/ref/ways_latest.pkl \
-    osm_ref/denmark.poly 2013021200000368/7/943/20317/Denmark_osm.v20210916 \
-    build/latest/Denmark_osm.v20210916 20260918            # ~5 min
+teasi osm --heights=build/ref/heights.bin osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    2013021200000368/7/943/20317/Denmark_osm.v20210916 \
+    build/latest/Denmark_osm.v20210916 20260918            # 66 s
 ```
 
-The steps in `compile_osm.py`:
+One command from the extract to the chart file; `--heights` is the elevation data, see below.
+It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.rs`:
 
 1. **Streets**: ways with a `highway` from the class table (without `area=yes`) and
    `route=ferry`. They are split at every OSM node used by several street ways, and at the
@@ -321,11 +319,10 @@ The steps in `compile_osm.py`:
 4. **Graph (B)**: the nodes per 8×8 cell sorted by position, indexed from 1; edges in both
    directions, bit 30 from `oneway` (`-1` backwards; `oneway:bicycle=no` both ways). Node
    `[2]` = the left turns per the rule above. Edge `[2]` = the ascent: the height at every
-   vertex from the 4 nearest nodes of the original (inverse distance², `osm_heights.py`) or,
-   without an original, bilinearly from the Copernicus elevation model (`dem_heights.py`, see
+   vertex from the 4 nearest nodes of the original (inverse distance²) or, without an
+   original, bilinearly from the Copernicus elevation model (`tools/dem_heights.py`, see
    below); then the sum of the height gains. Edges whose end nodes are more than 63 cells
-   apart (long ferries) do not enter the graph. With `B_ONLY=<pkl>` the compiler stops after
-   the graph (for calibration).
+   apart (long ferries) do not enter the graph.
 5. **D**: edges and lines (a3/a4) cut at the cell margin ± 512, a1 sorted by class and name.
    **A**: the name table per 4×4 cell, from the names of its 64 D cells.
    **C**: classes 0–3 joined with `shapely.line_merge`, Douglas-Peucker with 32 units
@@ -346,18 +343,19 @@ from the **Copernicus DEM GLO-90** (`tools/dem_heights.py`: tiles from the publi
 the model is a surface model with trees and houses). Calibrated on Denmark against the
 original ascents: σ = 0 gives a correlation of 0.76 (sum 1.77×), **σ = 1 a correlation of
 0.84 and a median ratio of 0.97**, 61 % within 10 cm, 88 % within 50 cm; σ = 2 gives 0.80,
-σ = 4 gives 0.69. The reconstruction from the original (`osm_heights.py`) is slightly better
-at 0.88 and stays in use for Denmark.
+σ = 4 gives 0.69. The reconstruction from the original ascents is slightly better at 0.88
+and was what the Danish map was rebuilt with.
 
 ```bash
-.venv/bin/python tools/osm_extract.py --filter osm_ref/great-britain-latest.osm.pbf build/gb/ways.pkl  # 12 min, 14 GB
-.venv/bin/python tools/dem_heights.py osm_ref/great-britain.poly osm_ref/dem build/gb/dem.pkl         # ~1 min (download)
-.venv/bin/python tools/compile_osm.py --heights=build/gb/dem.pkl --country=17 "--name=United Kingdom" \
-    build/gb/ways.pkl osm_ref/great-britain.poly - build/gb/GreatBritain_osm.v20260918 20260918    # 18 min, 18 GB
+python tools/dem_heights.py osm_ref/great-britain.poly osm_ref/dem build/gb/dem.pkl   # ~1 min
+python tools/heights_export.py build/gb/dem.pkl build/gb/dem.bin
+teasi osm --heights=build/gb/dem.bin --country=17 "--name=United Kingdom" \
+    osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly - \
+    build/gb/GreatBritain_osm.v20260918 20260918       # 4:13, 16.0 GB
 ```
 
-`--filter` keeps only the ways that `road_class` or `line_type` accepts and stores the node
-columns as typed arrays (otherwise Great Britain does not fit in memory).
+`way.rs` keeps only the ways that `road_class` or `line_type` accepts and stores the node
+columns as flat arrays (otherwise Great Britain does not fit in memory).
 
 **Match** (a build from `denmark-220101` against the original, every 7th D cell): 95 % of the
 a1 edges have identical geometry (the first and last point), and of those the class agrees
@@ -371,23 +369,15 @@ from `denmark-latest` (2026) has 38 % more edges (3.0 instead of 2.2 M) and is 9
 (the original 63 MB); the largest records (B 4.2 MB, D 1.0 MB) stay below those of the German
 map (6.5 / 1.3 MB). The cost factor (bits 20–23) and bit 28 stay 0.
 
-### In Rust
+### What was checked
 
-`rust/src/way.rs` (the extractor) and `rust/src/osm.rs` (the compiler) do the same without a
-pickle, see [../rust/README.md](../rust/README.md). The heights stay in Python and are
-exported once:
-
-```bash
-python rust/scripts/heights_export.py build/ref/heights.pkl build/ref/heights.bin
-./target/release/teasi osm --heights=build/ref/heights.bin \
-    osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
-    <original>/Denmark_osm.v20210916 build/Denmark_osm.v20210916 20260918   # 66 s
-```
-
-For Great Britain **all 22,711 records** are byte-identical with the Python version (4:13
-instead of 18:23, 16.0 instead of 18.0 GB), for Denmark 5981 of 5982: there, 5 of 3,004,615
-edges have an ascent that differs by 1 cm, because 16 pairs of reconstructed node heights sit
-at the same position and disagree. Needs libgeos (loaded at runtime).
+Both implementations built the layer from the same input and the files were compared record
+by record (`teasi md5s` on each, then a diff). For Great Britain **all 22,711 records** came
+out byte-identical, and the file the same size down to the byte (4:13 instead of 18:23, 16.0
+instead of 18.0 GB); for Denmark 5981 of 5982. In that one record, 5 of 3,004,615 edges have
+an ascent that differs by 1 cm, because 16 pairs of reconstructed node heights sit at the
+same position and disagree — which of them enters the mean of the 4 neighbours is arbitrary
+in either implementation.
 
 ## Open questions
 

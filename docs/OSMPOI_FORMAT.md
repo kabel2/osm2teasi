@@ -1,7 +1,7 @@
 # osmpoi format (`Denmark_osmpoi.v20210915`)
 
-As of 2026-09-18. **Fully understood**: `tools/layers.py` rebuilds all 3704 records
-**byte-identically** (`build_osmpoi(parse_osmpoi(raw)) == raw`).
+As of 2026-09-18. **Fully understood**: `layers.rs` rebuilds all 3704 records
+**byte-identically** (`build_osmpoi(parse_osmpoi(raw)) == raw`, checked by `teasi check`).
 
 Content: **points of interest from OSM** (restaurants, cafés, cash dispensers, stops,
 churches, hotels, camp sites, monuments …). The Danish file: 79,862 POIs in 3704 records
@@ -22,8 +22,8 @@ Shell, encryption, slot areas and the coordinate system: see
 ## D record (general layout)
 
 osmpoi, osm and ta all use the same container in slot area D. The generic parser/builder
-`parse_d` / `build_d` in `tools/layers.py` reads and writes all 12,934 D records of the
-three files byte-identically.
+`parse_d` / `build_arrays` in `layers.rs` reads and writes all 12,934 D records of the three
+files byte-identically.
 
 ```
 0x00  13 × u32  head
@@ -116,8 +116,8 @@ Danish file.
 | 0x1a | tram_stop | 35 | | | | |
 | 0x1b | subway_entrance (metro) | 31 | | | | |
 
-The list is also in `tools/layers.py` as `POI_TYPES`. How OSM tags map onto the types is
-not in the file; it was worked out by matching against OSM, see "Building it from OSM".
+How OSM tags map onto the types is not in the file; it was worked out by matching against
+OSM, see "Building it from OSM".
 
 ### Attribute string
 
@@ -159,25 +159,21 @@ sorted).
 
 ## Building it from OSM
 
-For large countries use `osm_poi_extract.py --filter`: it keeps only objects that `poi_type`
-accepts or that carry `seamark:type` (osmpoint); for Denmark this yields the same files.
-`compile_osmpoi.py` and `compile_osmpoint.py` take `--country=N` (default 4 = Denmark).
+One command from the extract to the chart file; `--country=N` defaults to 4 = Denmark:
 
 ```bash
-.venv/bin/python tools/osm_poi_extract.py osm_ref/denmark-latest.osm.pbf build/ref/poi_latest.pkl   # ~4 min
-.venv/bin/python tools/compile_osmpoi.py build/ref/poi_latest.pkl osm_ref/denmark.poly \
-    build/<dir>/Denmark_osmpoi.v20210915 [YYYYMMDD]                                            # ~30 s
+teasi osmpoi osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    build/<dir>/Denmark_osmpoi.v20210915 [YYYYMMDD]                 # 5.2 s
+teasi osmpoint …                                                    # the same arguments
 ```
 
-- `osm_poi_extract.py` stores every tagged node, way and multipolygon together with a
-  centre (the node, the mean of the corners, the centre of the bounding box, the centroid)
-  as a pickle.
-- `compile_osmpoi.py` assigns the types, builds the attributes, removes duplicates, groups
-  by 32×32 sub-cell and writes the file with `writer.py`. The date (header `0x44`) defaults
-  to today.
-- In Rust, `teasi osmpoi <pbf> <poly> <out> [YYYYMMDD] --country=N` does both in one run
-  without a pickle; for Great Britain 29 s instead of 24 min for the extraction alone
-  (`rust/README.md`, stage 3).
+- `poi.rs` keeps every tagged node, way and multipolygon that `poi_type` accepts or that
+  carries `seamark:type` (osmpoint), each with a centre (the node, the mean of the corners,
+  the centre of the bounding box, the centroid).
+- `osmpoi.rs` assigns the types, builds the attributes, removes duplicates, groups by 32×32
+  sub-cell and writes the file with `writer.rs`. The date (header `0x44`) defaults to today.
+- Both layers read the same candidates, so one pass over the PBF serves either; for Great
+  Britain that is 35 and 17 s (`rust/README.md`, stage 3).
 - `denmark.poly` is the Geofabrik boundary
   (`download.geofabrik.de/europe/denmark.poly`). Only POIs inside it are taken, because the
   extract also contains ways and relations reaching far abroad (points at 51° N, 1° E, for
@@ -194,7 +190,7 @@ same attribute string. Nearly all the differences are OSM changes after Septembe
 (among them an import by the Fødevarestyrelsen with `fvst:*` tags that added ~800 bakeries,
 butchers and snack bars).
 
-**Type rules** (first match wins, `RULES` in `tools/compile_osmpoi.py`):
+**Type rules** (first match wins, `RULES` in `osmpoi.rs`):
 
 | OSM | Type |
 |---|---|

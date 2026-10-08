@@ -1,5 +1,5 @@
 //! Areas (closed ways and multipolygons) and the coastline from a .osm.pbf,
-//! the input of the osmarea layer.  Port of tools/osm_area_extract.py.
+//! the input of the osmarea layer.
 //!
 //! Coordinates are the osmarea units straight away (360/2^25 degrees, rounded
 //! half to even like numpy's rint), not the 2^28 units of the other layers.
@@ -51,7 +51,7 @@ pub struct ATags {
     pub man_made: Option<Box<str>>,
     pub waterway: Option<Box<str>>,
     /// the terrain layer's land cover class, from the first tag in tag order
-    /// that carries one (`COVER` of compile_terrain.py)
+    /// that carries one (see [`crate::terrain::cover_class`])
     pub cover: Option<u8>,
 }
 

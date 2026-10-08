@@ -1,6 +1,6 @@
 # Ghidra helper scripts
 
-Four headless scripts for analysing `bikenav.exe` (ARM, WinCE). They were the main tool
+Headless scripts for analysing `bikenav.exe` (ARM, WinCE). They were the main tool
 for finding the encryption, the record reader and the search flow; all the results are in
 [../docs/CHART_FILES.md](../docs/CHART_FILES.md), sections 5.8 and 6.
 
@@ -38,5 +38,7 @@ Older scripts already fail to compile against it.
 `InsnGrep` also finds code that Ghidra has not assigned to any function (`in ?` in its
 output). That is where the key initialisation at `0x1fd148` sits, for instance.
 
-The unmaintained one-off searches from the analysis phase are in
-[../attic/ghidra/](../attic/ghidra/).
+[hunts/](hunts/) holds the 23 one-off searches from the analysis phase. They are not
+maintained: each one was written for a single question, several hard-code addresses, and
+they were kept only because the same kind of question comes up again. The four scripts
+above are the general tools.

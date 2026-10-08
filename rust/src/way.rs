@@ -1,5 +1,4 @@
 //! The ways the osm and ta layers are built from, read from a .osm.pbf.
-//! Port of tools/osm_extract.py.
 //!
 //! Only ways that [`crate::osm::road_class`] or [`crate::osm::line_type`]
 //! accept are kept -- that is what `--filter` does on the Python side, and it

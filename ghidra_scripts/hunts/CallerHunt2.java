@@ -39,7 +39,7 @@ public class CallerHunt2 extends GhidraScript {
                 if (g != null) { callers.add(g.getEntryPoint().toString()); n++; }
             }
             println("### " + f.getEntryPoint() + " size="
-                    + f.getBody().getNumAddresses() + "  aufrufer=" + n);
+                    + f.getBody().getNumAddresses() + "  callers=" + n);
         }
         println("### caller gesamt: " + callers.size() + " " + callers);
 

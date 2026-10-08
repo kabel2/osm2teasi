@@ -1,5 +1,5 @@
-//! The decrypted record contents of the vector layers.  Port of tools/layers.py;
-//! formats in docs/OSM*_FORMAT.md and docs/TA_FORMAT.md.
+//! The decrypted record contents of the vector layers; formats in
+//! docs/OSM*_FORMAT.md and docs/TA_FORMAT.md.
 //!
 //! Every container keeps the fields it does not interpret verbatim, so
 //! `build(parse(raw)) == raw` for all records of the original files.

@@ -1,6 +1,5 @@
 //! The outer shell of a chart file: header, checksum, tile directory, records.
-//! Port of tools/chart.py; the format is documented in
-//! docs/CHART_FILES.md sections 1 to 4.
+//! The format is documented in docs/CHART_FILES.md sections 1 to 4.
 
 use anyhow::{bail, Result};
 use md5::{Digest, Md5};
@@ -68,6 +67,15 @@ pub fn header_md5(d: &[u8], device: &[u8]) -> [u8; 16] {
     h.finalize().into()
 }
 
+/// The checksum `BikeNav/packages.xml` carries for a map file: 1 KB from 0x44
+/// (behind the salt and the MAC) plus the last KB, see docs/CHART_FILES.md 5.4.
+pub fn package_md5(d: &[u8]) -> md5::digest::Output<Md5> {
+    let mut h = Md5::new();
+    h.update(&d[0x44..0x444]);
+    h.update(&d[d.len() - 0x400..]);
+    h.finalize()
+}
+
 pub fn u32_at(d: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(d[off..off + 4].try_into().unwrap())
 }
@@ -129,7 +137,7 @@ pub fn records(d: &[u8], start: usize, end: usize) -> Vec<Rec> {
 }
 
 /// PC1 then LZMA.  osm's slot area B (routing graph) is stored LZMA-only;
-/// those records are recognised by the fallback, exactly as in chart.py.
+/// those records are recognised by the fallback.
 pub fn decode_record(payload: &[u8], pltx: usize, rk: &[u8]) -> Result<Vec<u8>> {
     if let Ok(out) = lzma::decompress(&pc1::decrypt_payload(payload, rk), pltx) {
         return Ok(out);

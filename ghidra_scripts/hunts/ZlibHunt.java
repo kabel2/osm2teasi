@@ -32,7 +32,7 @@ public class ZlibHunt extends GhidraScript {
                 }
             }
         }
-        println("### zlib-funktionen: " + zlibFuns);
+        println("### zlib functions: " + zlibFuns);
 
         Set<String> callers = new LinkedHashSet<String>();
         for (String z : zlibFuns) {
@@ -46,7 +46,7 @@ public class ZlibHunt extends GhidraScript {
                     callers.add(g.getEntryPoint().toString());
             }
         }
-        println("### aufrufer von inflate: " + callers.size() + " " + callers);
+        println("### callers of inflate: " + callers.size() + " " + callers);
 
         DecompInterface dci = new DecompInterface();
         dci.openProgram(currentProgram);

@@ -2,11 +2,11 @@
 //!
 //! The library is opened at run time (`dlopen`), so building `teasi` needs
 //! neither GEOS nor its headers; only `teasi osmarea` does.  Searched are
-//! `$TEASI_GEOS`, then `libgeos_c.so.1` and `libgeos_c.so`.  For output that is
-//! byte-identical to the Python compiler the same GEOS build has to be used --
-//! shapely ships its own in `<venv>/lib/python3*/site-packages/shapely.libs/`.
+//! `$TEASI_GEOS`, then `libgeos_c.so.1` and `libgeos_c.so`.  Different GEOS
+//! builds can round differently, so reproducing a chart byte for byte needs the
+//! same build; the reference results were taken with the one shapely bundles.
 //!
-//! Only the handful of calls `tools/compile_osmarea.py` makes is bound, and
+//! Only the handful of calls `osmarea.rs` makes is bound, and
 //! the wrappers keep shapely's semantics: `parts` is `shapely.get_parts`
 //! (a polygon is its own single part), `rect` builds a ring exactly like
 //! `shapely.box`, and the STRtree has shapely's node capacity so that queries

@@ -1,7 +1,7 @@
 //! POI and seamark candidates from a .osm.pbf: tagged nodes, tagged ways and
-//! tagged multipolygon relations.  Port of tools/osm_poi_extract.py --filter,
-//! which keeps the objects osmpoi::poi_type accepts plus everything carrying
-//! `seamark:type` -- the first set feeds the osmpoi layer, the second osmpoint.
+//! tagged multipolygon relations.  Kept are the objects `osmpoi::poi_type`
+//! accepts plus everything carrying `seamark:type` -- the first set feeds the
+//! osmpoi layer, the second osmpoint.
 //!
 //! Three passes, as in addr.rs: a relation needs its member ways, those need
 //! their nodes, and the PBF has nodes first, relations last.

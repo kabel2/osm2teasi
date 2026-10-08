@@ -1,5 +1,4 @@
 //! The osm layer: street net, names and the routing graph (OSM_FORMAT.md).
-//! Port of tools/compile_osm.py.
 //!
 //! Records built per tile: D (32x32 cells) with the road edges (a1) and the
 //! unnamed and named lines (a3, a4), A (4x4) with the street name table the a1

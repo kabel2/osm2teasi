@@ -1,14 +1,7 @@
-# Python 3.12+ (entwickelt mit 3.14).  pc1.py, chart.py, layers.py, writer.py,
-# roundtrip.py, packages.py, poly.py und ta_index.py brauchen nur die Standardbibliothek.
-numpy>=2.0           # alle Extraktoren und Compiler
-osmium>=4.0          # *_extract.py: OSM-PBF lesen
-scipy>=1.14          # compile_osm/osmarea/ta, osm_heights, dem_heights
-shapely>=2.0         # compile_osmarea, compile_osm, land_extract
-pyshp>=3.0           # land_extract: Landpolygon-Shapefile
-tifffile>=2025.1.1   # dem_heights: Copernicus-DEM (GeoTIFF)
-imagecodecs>=2025.1.1 # dem_heights: DEFLATE/LZW in den DEM-Kacheln
-pillow>=11.0         # compile_terrain: JPEG-Kartenbilder
-
-# Nur für attic/ (Firmware-Analyse):
-# capstone>=5.0
-# unicorn>=2.1
+# The Rust port needs only these two helpers in tools/, for the elevation data:
+# dem_heights.py (Copernicus DEM -> grid) and heights_export.py (grid -> flat
+# file).  Python 3.12+, developed with 3.14.
+numpy>=2.0
+scipy>=1.14            # dem_heights: Gaussian filter
+tifffile>=2025.1.1     # dem_heights: Copernicus DEM (GeoTIFF)
+imagecodecs>=2025.1.1  # dem_heights: DEFLATE/LZW in the DEM tiles

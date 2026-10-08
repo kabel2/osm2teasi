@@ -1,10 +1,10 @@
 //! The worldwide land polygons of osmdata.openstreetmap.de
 //! (`land-polygons-split-4326`, built from the whole world's
-//! `natural=coastline`), cut to the tiles around a country.  Port of
-//! tools/land_extract.py, including its own little shapefile reader -- a
-//! polygon shapefile is a flat sequence of records, so no crate is needed.
+//! `natural=coastline`), cut to the tiles around a country.  Includes its
+//! own little shapefile reader -- a polygon shapefile is a flat sequence of
+//! records, so no crate is needed.
 //!
-//! compile_osmarea uses these for countries without an original chart file: the
+//! `osmarea.rs` uses these for countries without an original chart file: the
 //! sea of a cell is the cell minus the land here.  A country extract alone is
 //! not enough, its coastline stops at the boundary.
 

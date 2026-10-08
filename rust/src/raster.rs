@@ -4,7 +4,7 @@
 //! The first two are ported from Pillow's C sources literally, down to the
 //! float widths and the rounding macros -- `Draw.c: polygon_generic` and
 //! `Resample.c: ImagingResampleInner` -- so that the land cover and the image
-//! pyramid come out exactly as `compile_terrain.py` draws them.  JPEG 2000 goes
+//! pyramid come out exactly as Pillow draws them.  JPEG 2000 goes
 //! through the same library Pillow uses (OpenJPEG, here compiled into the
 //! binary), with the parameters its `JPEG2000` plugin sets.  Only the JPEG
 //! encoder is a different one (`jpeg-encoder` instead of libjpeg-turbo): the map

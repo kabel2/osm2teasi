@@ -1,48 +1,50 @@
 # teasi (Rust)
 
-The tool chain ported to Rust. Finished are **the shell** (stage 1: decryption,
-compression, every record container, the writer, the search index), **reading OSM**
-(stage 2: PBF reader, node index, address extraction), **all five OSM layer compilers**
-(stage 3: `osmpoi`, `osmpoint`, `osmarea`, `osm` and `ta`, straight from the PBF into the
-chart file) and **the `terrain` layer** (stage 4: elevation model and map images). The
-Python tools in [../tools/](../tools/) remain the reference; what is here has to deliver the
-same.
+The whole tool chain in one binary: **the shell** (stage 1: decryption, compression, every
+record container, the writer, the search index), **reading OSM** (stage 2: PBF reader, node
+index, address extraction), **all five OSM layer compilers** (stage 3: `osmpoi`, `osmpoint`,
+`osmarea`, `osm` and `ta`, straight from the PBF into the chart file) and **the `terrain`
+layer** (stage 4: elevation model and map images).
 
-Only the height sources themselves stay in Python (`osm_heights.py` with scipy's `lsqr`,
-`dem_heights.py` with the Copernicus model); Rust reads their results, see below.
+This was written in Python first and then ported here in those four stages, each one checked
+against the Python output before the next began. That reference has served its purpose and is
+no longer in the tree; it is in the history up to commit `fc17505`, together with the
+comparison scripts, and the "what was checked" sections below are the record of what it
+agreed with. The only Python left is the elevation data: `../tools/dem_heights.py` for the
+Copernicus model and `../tools/heights_export.py` for the flat file this side reads.
 
 ## Status
 
-| Building block | Python | Rust |
+| Building block | Module | Notes |
 |---|---|---|
-| PC1, MD5 checksum, global key | `pc1.py`, `chart.py` | `pc1.rs`, `chart.rs` |
-| Raw LZMA1 as in the originals | `chart.py` | `lzma.rs` |
-| Containers A, B, C, D, osmpoint | `layers.py` | `layers.rs` |
-| Writing files, device binding | `writer.py` | `writer.rs` |
-| Search index of the address search | `ta_index.py` | `ta_index.rs` |
-| Reading OSM PBF, node index | pyosmium | `pbf.rs` |
-| Addresses, places, interpolation ways | `osm_addr_extract.py` | `addr.rs` |
-| Country boundary (`.poly`) | `poly.py` | `poly.rs` |
-| Reading POIs | `osm_poi_extract.py` | `poi.rs` |
-| Building the `osmpoi` layer | `compile_osmpoi.py` | `osmpoi.rs` |
-| Building the `osmpoint` layer | `compile_osmpoint.py` | `osmpoint.rs` |
-| Reading areas and the coastline | `osm_area_extract.py` | `area.rs` |
-| Worldwide land polygons (shapefile) | `land_extract.py` | `land.rs` |
-| Geometry (GEOS) | shapely | `geos.rs` |
-| Building the `osmarea` layer | `compile_osmarea.py` | `osmarea.rs` |
-| Reading street and line ways | `osm_extract.py` | `way.rs` |
-| Reading and querying heights | `osm_heights.py`, `dem_heights.py` | `heights.rs` |
-| Building the `osm` layer | `compile_osm.py` | `osm.rs` |
-| Nearest-neighbour search (instead of scipy's kd-tree) | `scipy.spatial` | `grid.rs` |
-| Building the `ta` layer (address search) | `compile_ta.py` | `ta.rs` |
-| Drawing, scaling, JPEG, JPEG 2000 | Pillow, OpenJPEG | `raster.rs` |
-| Building the `terrain` layer | `compile_terrain.py` | `terrain.rs` |
+| PC1, MD5 checksum, global key | `pc1.rs`, `chart.rs` | |
+| Raw LZMA1 as in the originals | `lzma.rs` | `xz2`, see the pitfalls at the end |
+| Containers A, B, C, D, osmpoint | `layers.rs` | |
+| Writing files, device binding | `writer.rs` | |
+| Search index of the address search | `ta_index.rs` | |
+| Reading OSM PBF, node index | `pbf.rs` | the `osmpbf` crate, instead of pyosmium |
+| Addresses, places, interpolation ways | `addr.rs` | |
+| Country boundary (`.poly`) | `poly.rs` | |
+| Reading POIs | `poi.rs` | |
+| Building the `osmpoi` layer | `osmpoi.rs` | |
+| Building the `osmpoint` layer | `osmpoint.rs` | |
+| Reading areas and the coastline | `area.rs` | |
+| Worldwide land polygons (shapefile) | `land.rs` | own shapefile reader |
+| Geometry (GEOS) | `geos.rs` | libgeos at run time, as shapely uses it |
+| Building the `osmarea` layer | `osmarea.rs` | |
+| Reading street and line ways | `way.rs` | |
+| Reading and querying heights | `heights.rs` | reads `../tools/heights_export.py`'s output |
+| Building the `osm` layer | `osm.rs` | |
+| Nearest-neighbour search | `grid.rs` | instead of scipy's kd-tree |
+| Building the `ta` layer (address search) | `ta.rs` | |
+| Drawing, scaling, JPEG, JPEG 2000 | `raster.rs` | the pieces of Pillow, OpenJPEG |
+| Building the `terrain` layer | `terrain.rs` | |
 
 ## Building and checking
 
 ```bash
 cargo build --release
-cargo test                 # reference values from the Python tools
+cargo test                 # frozen reference values, see tests/compat.rs
 TEASI_GEOS=… cargo test    # plus the two GEOS tests (otherwise skipped, see below)
 ```
 
@@ -65,7 +67,7 @@ match the original byte for byte. For the Danish map that is all **14,185 record
 | `teasi info <map>…` | header, tiles, record counts per slot area |
 | `teasi check <map>…` | take every record apart and rebuild it byte-identically |
 | `teasi roundtrip <map> [out]` | decrypt the whole file, write it again, compare the records |
-| `teasi md5s <map>` | `area cx cy md5` per record — to compare with Python |
+| `teasi md5s <map>` | `area cx cy md5` per record — to compare two charts |
 | `teasi dump <map> <dir>` | the decrypted records as individual files |
 | `teasi index <ta map>` | take the search index apart and rebuild it byte-identically |
 | `teasi addr <file.osm.pbf> [out]` | addresses, places and interpolation ways from OSM |
@@ -80,13 +82,13 @@ match the original byte for byte. For the Danish map that is all **14,185 record
 | `teasi ta <pbf> <poly> <map> [date]` | build the address search (`--country=N`, `--name=…`) |
 | `teasi terrain <heights> <poly> <map> [date]` | build the elevation model and the map images (`--land=…`, `--area=…`, `--rate=R`, `--only=x,y`) |
 
-As with the Python tools, the serial number comes from `TEASI_DEVICE` (the default being the
+The serial number comes from `TEASI_DEVICE` (the default being the
 one in `chart.rs`).
 
 ## Measured
 
-Against the original Danish map, 16 cores. "Python" is the same thing through
-`tools/layers.py` or `tools/ta_index.py`.
+Against the original Danish map, 16 cores. The "Python" column was measured against the
+reference implementation while it still existed.
 
 | | Python | Rust |
 |---|---:|---:|
@@ -110,8 +112,8 @@ folds them into per-thread accumulators. Then the node index: pyosmium keeps an 
 **every** node in the file in RAM, whereas here only the ids that an earlier pass asked for
 are collected — sorted, 16 bytes per node.
 
-`addr.rs` is `osm_addr_extract.py`, in three passes (a relation needs its ways, which need
-their nodes):
+`addr.rs` extracts them in three passes (a relation needs its ways, which need their
+nodes):
 
 1. relations: which `multipolygon` or `boundary` relations carry address or place
    information,
@@ -119,16 +121,15 @@ their nodes):
 3. nodes: the results that are nodes, the coordinates for the ways, and the house numbers of
    the interpolation nodes.
 
-### Checked against Python
+### What was checked
 
 ```bash
 ./target/release/teasi addr osm_ref/denmark-latest.osm.pbf rs.txt
-python scripts/addr_dump.py build/ref/addr_dk.pkl py.txt     # the same from the pickle
-python scripts/addr_compare.py py.txt rs.txt
 ```
 
-`addr_dump.py` writes the entries canonically, with coordinates as IEEE bit patterns;
-`addr_compare.py` pairs them by their tag fields and measures the deviation in metres.
+Both sides wrote the same canonical dump — the entries sorted, with the coordinates as IEEE
+bit patterns — and the comparison paired them by their tag fields and measured the deviation
+in metres.
 
 **Denmark** (`denmark-latest`): all 2,628,399 entries **bit-identical** — 2,614,623
 addresses and 13,776 places.
@@ -190,11 +191,10 @@ same thing.
 
 ## Stage 3: the osmpoi and osmpoint layers
 
-`poi.rs` is `osm_poi_extract.py --filter` and serves both layers — it keeps whatever
-`poi_type` accepts plus everything with a `seamark:type`. On top of it sit `osmpoi.rs`
-(`compile_osmpoi.py`: type rules, the attribute string, deduplication) and `osmpoint.rs`
-(`compile_osmpoint.py`: categories, colours, topmarks, light strings, sectors). No pickle in
-between — one command from the extract to the chart file:
+`poi.rs` serves both layers — it keeps whatever `poi_type` accepts plus everything with a
+`seamark:type`. On top of it sit `osmpoi.rs` (type rules, the attribute string,
+deduplication) and `osmpoint.rs` (categories, colours, topmarks, light strings, sectors).
+Nothing in between — one command from the extract to the chart file:
 
 ```bash
 ./target/release/teasi osmpoi osm_ref/great-britain-latest.osm.pbf \
@@ -202,18 +202,11 @@ between — one command from the extract to the chart file:
 ./target/release/teasi osmpoint …    # the same arguments
 ```
 
-Checking happens in two stages. The candidates against the Python pickle first, as with the
-addresses:
-
-```bash
-./target/release/teasi poi osm_ref/denmark-latest.osm.pbf rs.txt
-python scripts/poi_dump.py build/ref/poi_dk.pkl py.txt
-python scripts/poi_compare.py py.txt rs.txt      # pairs by kind and OSM id
-```
-
-Then the finished file record by record against the map built with Python (`teasi md5s` on
-both, then `diff`). The files themselves always differ, because every tile gets a new random
-key; the decrypted records have to be equal.
+Checking happened in two stages. The candidates first, as with the addresses: both sides
+wrote a canonical dump (`teasi poi <pbf> <out>`) and the comparison paired them by kind and
+OSM id. Then the finished file record by record against the map built with Python, with
+`teasi md5s` on both and a `diff`. The files themselves always differ, because every tile
+gets a new random key; the decrypted records have to be equal.
 
 | | Candidates bit-identical | Records bit-identical |
 |---|---|---|
@@ -242,9 +235,9 @@ of the word — `DGPS` becomes `Dgps`.
 
 ## Stage 3: the osmarea layer
 
-The first compiler that needs an outside library: `compile_osmarea.py` merges all the areas
-of one class, simplifies them, clips them to the country boundary and into blocks, and builds
-the sea from the coastline — all of it with shapely, and therefore with **GEOS**. The same
+The first compiler that needs an outside library: it merges all the areas of one class,
+simplifies them, clips them to the country boundary and into blocks, and builds the sea from
+the coastline. Python did all of that with shapely, and therefore with **GEOS**; the same
 bytes only come out of the same library, so `geos.rs` talks to libgeos directly.
 
 ```bash
@@ -256,49 +249,51 @@ bytes only come out of the same library, so `geos.rs` talks to libgeos directly.
     --country=17 --land=osm_ref/land-polygons-split-4326/land_polygons.shp
 ```
 
-`area.rs` is `osm_area_extract.py` (areas and the coastline, coordinates straight in osmarea
-units of 360/2^25 degrees), `land.rs` is `land_extract.py` together with a small shapefile
-reader — a polygon shapefile is a flat sequence of records, so it needs no crate.
+`area.rs` reads the areas and the coastline, with the coordinates straight in osmarea units
+of 360/2^25 degrees; `land.rs` reads the worldwide land polygons with a small shapefile
+reader of its own — a polygon shapefile is a flat sequence of records, so it needs no crate.
 `osmarea.rs` is the compiler itself.
 
 ### libgeos at runtime
 
 `geos.rs` loads `libgeos_c` with `dlopen`, binds only the roughly 40 functions in use and
 keeps one GEOS context per thread. The advantage: `cargo build` needs neither GEOS nor its
-headers, only `teasi osmarea` and `teasi osm` need the library — and one can use exactly the
-one shapely uses. It looks for `$TEASI_GEOS`, then `libgeos_c.so.1`, then `libgeos_c.so`:
+headers, only `teasi osmarea` and `teasi osm` need the library — and one can point it at any
+build. It looks for `$TEASI_GEOS`, then `libgeos_c.so.1`, then `libgeos_c.so`:
 
 ```bash
-G=.venv/lib/python3*/site-packages/shapely.libs
-TEASI_GEOS=$PWD/$G/libgeos_c-*.so.* LD_LIBRARY_PATH=$PWD/$G ./target/release/teasi osmarea …
+TEASI_GEOS=/path/to/libgeos_c.so.1 ./target/release/teasi osmarea …
 ```
 
-(`LD_LIBRARY_PATH` is needed because shapely's `libgeos_c` looks for its `libgeos` next to
-itself, without an RPATH.) For **bit-identical** results it has to be the same GEOS version
-shapely has — 3.13.1 here. The wrappers stick to shapely's semantics: `parts` is
-`shapely.get_parts` (a polygon is its own single part), `Geom::rect` builds the ring exactly
+The reference results were taken with the GEOS that shapely bundles (3.13.1), picked up from
+an installed shapely's `shapely.libs/` with `TEASI_GEOS` plus an `LD_LIBRARY_PATH` to the
+same directory — its `libgeos_c` looks for `libgeos` next to itself, without an RPATH.
+Reproducing a chart byte for byte needs that same version.
+
+The wrappers stick to shapely's semantics: `parts` is `shapely.get_parts` (a polygon is its
+own single part), `Geom::rect` builds the ring exactly
 like `shapely.box`, open rings are closed as they are there, and the STRtree has shapely's
 node capacity of 10 — otherwise a query would come back in a different order, and that order
 decides which polygon enters a union first.
 
-### One change in Python
+### One thing the port changed
 
-`compile_osmarea.py` took the areas in the order the extractor wrote them — and that is the
+The first version took the areas in the order the extractor wrote them — and that is the
 order in which libosmium flushes its buffers. That order decides which polygon enters a union
-first and hence what ends up in the file. It cannot be reproduced, so **Python** now sorts by
-the osmium id too (`load()` in `compile_osmarea.py`). That makes the output reproducible; the
-map is the same as before, only assembled in a defined order.
+first and hence what ends up in the file. It cannot be reproduced, so the areas are sorted by
+their osmium id. That makes the output reproducible; the map is the same as before, only
+assembled in a defined order.
 
-### Checked against Python
+### What was checked
 
-In two stages as with the POIs — the extractor against the pickle first, then the records:
+In two stages as with the POIs — the extractor first, then the records:
 
 ```bash
 ./target/release/teasi area osm_ref/denmark-latest.osm.pbf rs.txt
-python scripts/area_dump.py build/ref/area_latest.pkl py.txt
-python scripts/area_compare.py py.txt rs.txt          # pairs by the osmium id
-python scripts/osmarea_compare.py py.v20210810 rs.v20210810   # object by object
 ```
+
+Both sides wrote that dump, paired by the osmium id; the finished files were compared object
+by object, which is finer than `teasi md5s` and says which ring differs.
 
 | | Denmark | Great Britain |
 |---|---|---|
@@ -311,8 +306,8 @@ python scripts/osmarea_compare.py py.v20210810 rs.v20210810   # object by object
 
 The deviating records hang off the deviating areas from above (55 in Denmark, 347 in Great
 Britain): a single deviating area changes the union of its class and with it every block it
-lies in — and one record holds every class of a cell. Compared object by object
-(`osmarea_compare.py`) it comes down to individual rings with one point more or less.
+lies in — and one record holds every class of a cell. Object by object it comes down to
+individual rings with one point more or less.
 
 The sea is the most involved part of this and matches completely: the coastline is assembled
 into chains (land on the left, open chains closed with a straight line), outside the boundary
@@ -321,10 +316,10 @@ even-odd rule.
 
 ## Stage 3: the osm layer
 
-The largest compiler: `compile_osm.py` builds four kinds of record out of the street ways —
-**D** with the edges and lines, **A** with the name table, **B** with the routing graph and
-**C** with the overview lines. Python computes that with numpy across the whole country and
-needs 18 GB for it; here they are flat `Vec`s with the same index columns.
+The largest compiler: it builds four kinds of record out of the street ways — **D** with the
+edges and lines, **A** with the name table, **B** with the routing graph and **C** with the
+overview lines. Python computed that with numpy across the whole country and needed 18 GB for
+it; here they are flat `Vec`s with the same index columns.
 
 ```bash
 ./target/release/teasi ways osm_ref/denmark-latest.osm.pbf ways.txt   # the extractor alone
@@ -337,48 +332,52 @@ needs 18 GB for it; here they are flat `Vec`s with the same index columns.
     build/GreatBritain_osm.v20260918 20260918
 ```
 
-`way.rs` is `osm_extract.py`: the ways that `road_class` or `line_type` accepts, with their
-node ids, then the coordinates of those nodes. That corresponds to `--filter` on the Python
-side; the ways Python additionally keeps without the switch cannot reach the output (the
-compiler only sees streets and lines, and the node rows of the rest do not enter any
-calculation). `osm.rs` is the compiler.
+`way.rs` keeps the ways that `road_class` or `line_type` accepts, with their node ids, then
+the coordinates of those nodes. The unfiltered extract Python could also produce cannot reach
+the output anyway: the compiler only sees streets and lines, and the node rows of the rest do
+not enter any calculation. `osm.rs` is the compiler.
 
 The order of the ways decides how entries of equal rank are sorted within a record. Python
-takes it as libosmium hands it out — the order of the file, and the Geofabrik extracts are
+took it as libosmium handed it out — the order of the file, and the Geofabrik extracts are
 sorted by id. Rust decodes the blocks in parallel and therefore sorts explicitly by way id
 afterwards.
 
 ### Heights
 
-The ascent of an edge (B edge word [2]) comes from node heights, and those come either from
-the routing graph of an original file (`osm_heights.py`, scipy's `lsqr` over 2.1 M equations)
-or from the Copernicus elevation model (`dem_heights.py`, tiles from the AWS bucket, Gaussian
-smoothing). Both are one-off computations and stay in Python;
-`scripts/heights_export.py` writes their pickle into a flat binary file that `heights.rs`
-reads:
+The ascent of an edge (B edge word [2]) comes from node heights, and those come from the
+**Copernicus elevation model**: `../tools/dem_heights.py` downloads the tiles from the AWS
+bucket, resamples them into one grid and smooths it, and `../tools/heights_export.py` writes
+that grid as the flat binary file `heights.rs` reads. It is a one-off computation per
+country, which is why it stayed in Python — the libraries for a GeoTIFF archive and a
+Gaussian filter are there.
 
 ```bash
-python scripts/heights_export.py build/ref/heights.pkl build/ref/heights.bin
+python tools/dem_heights.py osm_ref/great-britain.poly osm_ref/dem build/gb/dem.pkl
+python tools/heights_export.py build/gb/dem.pkl build/gb/dem.bin
 ```
+
+`heights.rs` also reads heights **per node**, which is how the Danish map was reproduced
+exactly: the ascents of an original chart are an over-determined linear system for its node
+heights, and solving it (scipy's `lsqr` over 2.1 M equations) gives them back to within
+50 cm for 97.5 % of the edges. That reconstruction only makes sense where an original file
+exists; it is in the history, with the rest of the Python reference.
 
 For the node heights the 4 nearest neighbours are needed (inverse distance²). Instead of a
 kd-tree as in scipy, a uniform grid lies over the known points and is searched ring by ring
 outwards until the next ring cannot be any closer — the same result, only without a tree.
 
-### Checked against Python
+### What was checked
 
-In two stages as with the other layers:
+In two stages as with the other layers — the extractor, then the records:
 
 ```bash
 ./target/release/teasi ways osm_ref/denmark-latest.osm.pbf rs.txt
-python scripts/ways_dump.py build/ref/ways_latest.pkl py.txt
-python scripts/ways_compare.py py.txt rs.txt
-./target/release/teasi md5s <python.v20210916> ; ./target/release/teasi md5s <rust.v20210916>
+./target/release/teasi md5s <one.v20210916> ; ./target/release/teasi md5s <other.v20210916>
 ```
 
-`ways_dump.py` writes the class or line type, the flags, the number of rows, the name and an
-MD5 over the node ids and coordinates (as IEEE bit patterns) per way — which puts the tag
-tables on the test bench as well.
+The dump holds the class or line type, the flags, the number of rows, the name and an MD5
+over the node ids and coordinates (as IEEE bit patterns) per way — which puts the tag tables
+on the test bench as well.
 
 | | Denmark | Great Britain |
 |---|---|---|
@@ -402,10 +401,10 @@ Great Britain takes the grid route and is therefore completely identical.
 
 ## Stage 3: the ta layer (address search)
 
-The last OSM compiler and the one with the most rules: `compile_ta.py` cuts the named streets
-into pieces, attaches every house number to the nearest piece of the same name, gives every
-piece its places, groups pieces into streets and builds the D and A records plus the
-country-wide **search index** from them.
+The last OSM compiler and the one with the most rules: it cuts the named streets into
+pieces, attaches every house number to the nearest piece of the same name, gives every piece
+its places, groups pieces into streets and builds the D and A records plus the country-wide
+**search index** from them.
 
 ```bash
 ./target/release/teasi ta --country=17 "--name=United Kingdom" \
@@ -421,12 +420,12 @@ pairs under 60 m (`query_pairs`).
 
 ### Order is everything here
 
-More results hang off orderings in `compile_ta.py` than in any other compiler:
-`Counter.most_common` breaks ties by insertion order, the centres of the postcode districts
+More results hang off orderings in this layer than in any other compiler: in Python
+`Counter.most_common` broke ties by insertion order, the centres of the postcode districts
 are floating-point sums, and the order of the index hits is the order in which they arose.
 `ta.rs` therefore has an `Ordered` map and a `Counter` that behave like Python's `dict` and
-`collections.Counter`. On top of that, **three changes in Python**, all of them so that the
-same run yields the same output twice:
+`collections.Counter`. On top of that, **three rules had to change on both sides**, all of
+them so that the same input yields the same output twice:
 
 1. Addresses, places and interpolation lines are **sorted canonically**. The extractor hands
    them out in libosmium's order, which cannot be reproduced (and Rust reads the blocks in
@@ -437,16 +436,16 @@ same run yields the same output twice:
 3. **The direction of a house number range** (from/to) comes from the correlation between
    position and number. If the correlation is 10⁻¹⁷ the numbers do not run along the piece at
    all, and the last bit of numpy's covariance decided whether the range counts up or down.
-   Both sides now take correlations below 10⁻¹² as zero (`CORR_TOL`).
+   Correlations below 10⁻¹² therefore count as zero (`CORR_TOL`).
 
 The third change was the last remaining deviation: without it there were 2 Danish and 37
 British records, with it none.
 
-### Checked against Python
+### What was checked
 
 ```bash
-python tools/compile_ta.py --country=4 --name=Denmark ways.pkl addr.pkl denmark.poly py.v2 20260918
-./target/release/teasi ta --country=4 --name=Denmark denmark-latest.osm.pbf denmark.poly rs.v2 20260918
+./target/release/teasi ta --country=4 --name=Denmark denmark-latest.osm.pbf denmark.poly \
+    rs.v2 20260918
 ./target/release/teasi md5s py.v2 ; ./target/release/teasi md5s rs.v2     # then diff
 ./target/release/teasi index rs.v2                                        # the search index
 ```
@@ -475,8 +474,8 @@ place areas that already differ by 27 m there.
 
 `terrain.rs` builds the type 5 file: per region (1.40625°) 8×8 cells of 256×256 px, the
 heights as JPEG 2000 tiles and the map images as JPEG, the latter additionally as a pyramid
-of 4×4, 2×2 and 1×1. The heights come from `heights.rs` (the export of `dem_heights.py`), the
-land cover from `area.rs` and the sea from `land.rs`.
+of 4×4, 2×2 and 1×1. The heights come from `heights.rs` (the export of
+`../tools/dem_heights.py`), the land cover from `area.rs` and the sea from `land.rs`.
 
 ```bash
 # the elevation profile only, like region (122,20) of Denmark_terrain
@@ -524,9 +523,9 @@ implementation), and what the decoder in the device accepts is not documented.
 `openjpeg-sys` compiles OpenJPEG 2.5.3 into the binary; the parameters are those of Pillow's
 plugin (`irreversible`, 6 resolutions, code blocks 64×64, LRCP, one layer, ratio 50). The
 result is **byte-identical** down to one byte: OpenJPEG writes its own version into the
-comment marker, and Pillow ships 2.5.4. That stays as it is — writing a false version into
-the file would be worse than one byte of difference, and `scripts/terrain_compare.py` masks
-it out.
+comment marker, and Pillow ships 2.5.4. That stays as it is: writing a false version into
+the file would be worse than one byte of difference, and the comparison masked that byte
+out.
 
 The map images go through `jpeg-encoder` (pure Rust) instead of libjpeg-turbo: baseline,
 4:2:0, standard Huffman tables, IJG quantisation for quality 80, JFIF with 96 dpi and the
@@ -534,11 +533,10 @@ EXIF APP1 of the originals. The bytes are different — the segments come in a d
 and the chroma subsampling averages per block while libjpeg filters triangularly. For images
 that are lossy anyway and that the file keeps no checksum over, that is accepted.
 
-### Checked against Python
+### What was checked
 
-`scripts/terrain_compare.py` compares two chart files region by region — the tables, the
-elevation tiles byte for byte, the map images as pixels. `teasi check` cannot do this; the
-layer has no slot areas.
+Two chart files were compared region by region — the tables, the elevation tiles byte for
+byte, the map images as pixels. `teasi check` cannot do this; the layer has no slot areas.
 
 | | Regions | Elevation tiles | Map images |
 |---|---|---|---|
@@ -558,9 +556,9 @@ three hundred-thousandths smaller.
 | Denmark (28 regions) | 10 s | 17 s, 1.7 GB — 7 s of that the regions |
 | Great Britain (85 regions) | ~2 min, 10 GB | 1:24, 7.9 GB |
 
-The two columns do not measure the same thing: Python is handed three finished pickles
-(`dem_heights.py`, `land_extract.py`, `osm_area_extract.py` — over 20 min for Great Britain),
-while Rust reads the 2.2 GB PBF and the 1.3 GB shapefile within its own times. The regions
+The two columns do not measure the same thing: Python was handed three finished pickles (the
+elevation grid, the land polygons and the areas — over 20 min for Great Britain), while Rust
+reads the 2.2 GB PBF and the 1.3 GB shapefile within its own times. The regions
 alone are about as fast in Rust as in Python, because the work is already in C there and
 spread across every core.
 

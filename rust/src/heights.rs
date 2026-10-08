@@ -1,9 +1,9 @@
 //! Node heights for the ascents of the routing graph (B edge word [2]).
 //!
-//! Two sources, as on the Python side: heights per node, reconstructed from the
-//! routing graph of an original chart (`tools/osm_heights.py`), or an elevation
-//! grid from the Copernicus DEM (`tools/dem_heights.py`).  Both arrive here as
-//! the flat binary that `scripts/heights_export.py` writes from their pickles:
+//! Two sources: heights per node, reconstructed from the routing graph of an
+//! original chart, or an elevation grid from the Copernicus DEM
+//! (`tools/dem_heights.py`).  Both arrive here as the flat binary that
+//! `tools/heights_export.py` writes from their pickle:
 //!
 //! ```text
 //! "TEASIHT1" kind:u32  kind 0 = nodes, 1 = grid

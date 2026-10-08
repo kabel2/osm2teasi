@@ -1,12 +1,12 @@
 # ta format (`Denmark_ta.v20180608`)
 
 As of 2026-09-19. **Fully understood**:
-- `parse_a`/`build_a` and `parse_d`/`build_d` in `tools/layers.py` rebuild all 4125 records
+- `parse_a`/`build_a` and `parse_d`/`build_arrays` in `layers.rs` rebuild all 4125 records
   byte-identically (A 101, D 4024).
-- `tools/ta_index.py` rebuilds the search index byte-identically.
+- `ta_index.rs` rebuilds the search index byte-identically.
 - The firmware's search flow is decoded (section "Search").
 
-**Compiler:** `tools/compile_ta.py` builds the layer from OSM, see "Building it from OSM".
+**Compiler:** `teasi ta` builds the layer from OSM, see "Building it from OSM".
 
 Content: **address data for the address search**:
 - a street network with a street name per side of the road and **house number ranges**,
@@ -183,43 +183,31 @@ postcodes have keys like `9990` and list the street offsets per cell.
 
 ## Rebuilding it
 
-```python
-import sys; sys.path.insert(0, "tools")
-import layers as L, ta_index
-d = open(PATH, "rb").read()
-for tx, ty, cx, cy, g, raw in L.iter_records(d, "D"):
-    assert L.build_d(L.parse_d(raw)) == raw
-for tx, ty, cx, cy, g, raw in L.iter_records(d, "A"):
-    assert L.build_a(L.parse_a(raw)) == raw
-t = open("build/ref/ta_dk_extra.bin", "rb").read()   # d[header 0x70 : end of the tile]
-assert ta_index.build(ta_index.parse(t)) == t
+```bash
+teasi check <maps>/Denmark_ta.v20180608    # every A and D record, taken apart and rebuilt
+teasi index <maps>/Denmark_ta.v20180608    # the search index behind header 0x70
 ```
 
-`tools/ta_lookup.py <ta> <place> <street> [<number>]` replays the firmware's search (place →
-cells → street list → first matching edge → position).
+The search itself (place → cells → street list → first matching edge → position) was replayed
+offline against the semantics above, at 3000 random addresses; see below. That replay lived in
+the Python reference and is in the history up to commit `fc17505`.
 
 ## Building it from OSM
 
 ```bash
-.venv/bin/python tools/osm_addr_extract.py osm_ref/great-britain-latest.osm.pbf build/gb/addr.pkl
-.venv/bin/python tools/compile_ta.py --cache=build/gb/ta_cache.pkl --country=17 "--name=United Kingdom" \
-    build/gb/ways.pkl build/gb/addr.pkl osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919
+teasi ta --country=17 "--name=United Kingdom" osm_ref/great-britain-latest.osm.pbf \
+    osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919
 ```
 
-Runtimes for Great Britain:
-- Extract: about 20 min.
-- Compiler: 8 min on the first run, which builds the cache (840 MB) with the street pieces
-  and the house numbers matched to them.
-- With the cache in place: 4 min, peak memory 16 GB. The cache has to be deleted when
-  `ways.pkl`, `addr.pkl` or the piece/matching rules change.
+One command from the extract to the chart file: 3:19 and 13.7 GB for Great Britain, 40 s for
+Denmark. It needs libgeos and reads the PBF twice, because it needs both the addresses and
+the streets.
 
-The D records are built by 8 workers. They only get the data of their own cells, because
-forked workers sharing the piece list copy it and together need over 28 GB.
-
-- `osm_addr_extract.py` stores every address (`addr:housenumber` with `addr:street`), the
-  interpolation lines (`addr:interpolation`) and the places (`place=*` with a name).
-- `compile_ta.py` takes the streets from the pickle of `osm_extract.py` (like
-  `compile_osm.py`).
+- `addr.rs` reads every address (`addr:housenumber` with `addr:street`), the interpolation
+  lines (`addr:interpolation`) and the places (`place=*` with a name).
+- `ta.rs` takes the streets from `way.rs`, the same extractor the osm layer uses, and
+  searches for the nearest points with the uniform grid of `grid.rs` instead of scipy's
+  `cKDTree`; see [../rust/README.md](../rust/README.md).
 
 1. **Streets:** named streets of the osm classes 0–8 (motorway down to pedestrian zone),
    split at junctions as in osm and **additionally at the D cell borders**. That way every
@@ -251,31 +239,22 @@ forked workers sharing the piece list copy it and together need over 28 GB.
    - Names are stored inline (no word pool), every language mask full, the language list as
      in DK.
 
-### In Rust
+### What was checked
 
-`rust/src/ta.rs` does the same without a pickle, using `rust/src/grid.rs` instead of scipy's
-`cKDTree`; see [../rust/README.md](../rust/README.md).
+For Denmark **all 3958 records and the search index came out byte-identical** with the
+Python reference, for Great Britain 13,679 of 13,680 records, and both files are the same
+size down to the byte; the one difference and 9 of 522,760 index nodes go back to the two
+addresses that the Rust extractor additionally finds.
 
-```bash
-./target/release/teasi ta --country=17 "--name=United Kingdom" \
-    osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly \
-    build/gb/GreatBritain_ta.v20260919 20260919      # 3:19, 13.7 GB
-```
-
-For Denmark **all 3958 records and the search index are byte-identical** with the Python
-version, for Great Britain 13,679 of 13,680 records, and both files are the same size down
-to the byte; the one difference and 9 of 522,760 index nodes go back to the two addresses
-that the Rust extractor additionally finds.
-
-Three things had to change in `compile_ta.py` as well, so that two runs would even produce
-the same output: addresses, places and interpolation lines are sorted canonically (the
-extractor hands out libosmium's order), a search index node's children are sorted by
-character (previously the iteration order of a `set` — which changes with the hash seed),
-and a correlation below 10⁻¹² counts as zero (`CORR_TOL`) instead of letting its last bit
-decide the direction of a house number range.
+Three rules had to change before two runs over the same input produced the same output at
+all: addresses, places and interpolation lines are sorted canonically (the extractor hands
+out libosmium's order), a search index node's children are sorted by character (previously
+the iteration order of a Python `set` — which changes with the hash seed), and a correlation
+below 10⁻¹² counts as zero (`CORR_TOL`) instead of letting its last bit decide the direction
+of a house number range.
 
 **Match against Denmark:** built from `denmark-220101`: 22.6 MB (the original is 22.2 MB).
-Looked up at 3000 random OSM addresses with the firmware's logic (`ta_lookup.py`):
+Looked up at 3000 random OSM addresses with the firmware's logic:
 
 | | found | median | 75 % | 90 % | < 50 m |
 |---|---:|---:|---:|---:|---:|

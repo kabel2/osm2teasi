@@ -1,11 +1,13 @@
-"""Elevation grid for compile_osm.py (B edge ascents) from the Copernicus DEM GLO-90.
+"""Elevation grid from the Copernicus DEM GLO-90, for `teasi terrain` and the B edge
+ascents of `teasi osm --heights`.
 
-For countries without an original osm file (osm_heights.py needs one).  Downloads the
-1x1 deg tiles covering <area.poly> from the public AWS bucket copernicus-dem-90m into
-<tile dir> (tiles that do not exist are open sea), resamples them to one grid of 3"
-(1200 values per degree in both directions) and smooths it with a Gaussian filter of
-SIGMA grid points: the DEM is a surface model (trees, buildings) and its noise would add
-up to spurious ascents along the roads.
+Downloads the 1x1 deg tiles covering <area.poly> from the public AWS bucket
+copernicus-dem-90m into <tile dir> (tiles that do not exist are open sea), resamples
+them to one grid of 3" (1200 values per degree in both directions) and smooths it with
+a Gaussian filter of SIGMA grid points: the DEM is a surface model (trees, buildings)
+and its noise would add up to spurious ascents along the roads.
+
+Pass the result through heights_export.py to get the flat file the Rust side reads.
 
 Output (pickle): {"grid": float32 array (rows, cols), heights in m, "lon0", "lat0":
 north-west corner in deg, "step": deg per grid point}
@@ -25,7 +27,13 @@ import tifffile
 from scipy.ndimage import gaussian_filter
 
 import poly
-from writer import cli
+
+
+def cli(argv):
+    """argv -> (positional args, {option: value}) for --key=value / --flag options"""
+    opts = dict((a[2:].split("=", 1) + [""])[:2] for a in argv if a.startswith("--"))
+    return [a for a in argv if not a.startswith("--")], opts
+
 
 N = 1200                             # grid points per degree (3")
 SIGMA = 1.0

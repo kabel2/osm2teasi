@@ -1,6 +1,6 @@
 //! PC1 (Pukall Cipher 1, 256 bit) as used by bikenav.exe.
 //!
-//! Port of tools/pc1.py, which is verified against FUN_00289660 / FUN_002896c8
+//! Verified against FUN_00289660 / FUN_002896c8
 //! (keystream), FUN_002897b0 (full decrypt of the 32-byte tile blob) and
 //! FUN_002898ec (partial decrypt of a record payload: bytes 0..99, then every
 //! 10th byte).  All arithmetic is 16 bit and wraps.

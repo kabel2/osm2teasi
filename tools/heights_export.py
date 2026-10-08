@@ -1,6 +1,6 @@
-"""Convert the height pickles of osm_heights.py / dem_heights.py for `teasi osm`.
+"""Convert the elevation pickle of dem_heights.py for `teasi terrain` / `teasi osm`.
 
-The Rust compiler reads the same heights as a flat little-endian file:
+The Rust compilers read the heights as a flat little-endian file:
 
     "TEASIHT1" kind:u32   kind 0 = nodes, 1 = grid
       nodes: n:u64, then n float64 each of X, Y (360/2^28 units) and h (cm)

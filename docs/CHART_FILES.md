@@ -10,7 +10,7 @@ of the Teasi PRO (`bikenav.exe` 4.4.1.0, WinCE/ARM), for example
 > records of the vector layers (osm, osmarea, osmpoi, osmpoint, ta) can be decrypted and
 > decompressed with them.
 >
-> The other direction works too: `tools/writer.py` builds valid files, and a freshly built
+> The other direction works too: `writer.rs` builds valid files, and a freshly built
 > test package runs on the device (2026-09-18). To avoid a warning, size and MD5 in
 > `BikeNav/packages.xml` have to be updated (section 5.4).
 
@@ -75,7 +75,7 @@ A tile ends where the next one begins (the last one at the end of the file).
 
 - `len`: the length of the encrypted, compressed payload
 - `pltx`: the size **after** decompressing (always even)
-- The next record: `offset + 8 + len`. `tools/chart.py` follows this chain, whereas the
+- The next record: `offset + 8 + len`. `chart.rs` follows this chain, whereas the
   firmware jumps straight to a record through the slots (section 1a). Both give the same set:
   every record sits in exactly one slot.
 
@@ -105,7 +105,7 @@ Details that were checked:
   table** begins (header `0x70`), reaching to the end of the tile (2,596,612 B). It is the
   country-wide **search index** of the address search (a prefix tree over the place and
   postcode names, see [TA_FORMAT.md](TA_FORMAT.md)). It is not a record, but its first u32
-  looks like a record length. `chart.py` therefore runs into it and reports a "failed" entry;
+  looks like a record length. `teasi dump` therefore runs into it and reports a "failed" entry;
   the slots are what counts.
 - The DE and NO folders (`20322`, `20339`) contain only 0-byte files.
 
@@ -135,7 +135,7 @@ The readers check `cell_x < 0x400, cell_y < 0x200` (4×4) or `< 0x2000, < 0x1000
 `u32 = (v << 16) | u`, with u going east and v going south. **A sub-cell is always 32768
 units** wide, so the unit is 360°/2²⁵ (≈ 1.2 m) for 4×4 cells and 360°/2²⁸ (≈ 15 cm) for
 32×32 cells. Rounding goes to the nearest unit, and the points are then **exactly OSM nodes**
-(matched against the Geofabrik extract `denmark-220101`, `tools/osm_extract.py`).
+(matched against the Geofabrik extract `denmark-220101`, `teasi ways`).
 
 | Layer / area | Margin | Checked |
 |---|---|---|
@@ -158,8 +158,8 @@ also fits the terrain hypothesis with 1.40625° (tile (122,19) contains the Faro
   general D record) · [OSM_FORMAT.md](OSM_FORMAT.md) (with the geometry and the A and B
   records) · [OSMAREA_FORMAT.md](OSMAREA_FORMAT.md) (with the general C record) ·
   [TA_FORMAT.md](TA_FORMAT.md) · [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md).
-- **All 14,185 records** of every vector layer can be parsed with `tools/layers.py` and built
-  again **byte-identically** (round-trip test).
+- **All 14,185 records** of every vector layer can be parsed with `layers.rs` and built
+  again **byte-identically** (`teasi check`).
 
 The terrain file (type 5) is laid out differently and is **unencrypted** (JPEG tiles and a
 JPEG 2000 elevation model), see [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md).
@@ -253,114 +253,117 @@ The device `2013021200000368` has the prefix `20130212` and therefore uses the s
 
 ## 5. Tools
 
-All the Python tools sit in `tools/`. `chart.py`, `pc1.py`, `layers.py`, `writer.py`,
-`roundtrip.py`, `packages.py`, `poly.py` and the compilers `compile_*.py` need nothing beyond
-the standard library (`hashlib`, `lzma`); `osm_extract.py`, `osm_poi_extract.py` and
-`osm_area_extract.py` additionally need `osmium` and `numpy`, `compile_osmarea.py` and
-`compile_osm.py` need `shapely`, `osm_heights.py`, `compile_osm.py` and `compile_osmarea.py`
-need `scipy`, `land_extract.py` needs `pyshp`, `dem_heights.py` needs `tifffile` +
-`imagecodecs`, and `compile_terrain.py` needs `Pillow` + `shapely` (`requirements.txt`). Use
-the project venv to run them (`.venv/bin/python`).
-
-The device's serial number sits in one place: `DEVICE` in `tools/chart.py`, overridable with
-the environment variable `TEASI_DEVICE`. Every function with a `device` parameter takes it as
-the default.
-
-### 5.1 `tools/chart.py`: reading and decrypting maps
-
-**As a command line tool:** it decrypts every record of a file and writes them out as
-individual files.
+Everything is one binary, `teasi`, built from `rust/`:
 
 ```bash
-.venv/bin/python tools/chart.py 2013021200000368/7/943/20317/Denmark_osm.v20210916 out/osm
+cd rust && cargo build --release        # ./target/release/teasi
 ```
 
-Output:
+| Command | Purpose |
+|---|---|
+| `info <chart>…` | header, tiles, record counts, and the `packages.xml` values (5.4) |
+| `dump <chart> <out-dir>` | write every decrypted record to a file |
+| `md5s <chart>` | `area cx cy md5` per record, to compare two charts |
+| `check <chart>…` | parse and rebuild every record; must be byte-identical |
+| `roundtrip <chart> [out]` | decode the whole file, write it again, compare (5.3) |
+| `index <ta chart>` | the search index: parse, rebuild, compare |
+| `ways`, `addr`, `poi`, `area`, `land` | the OSM extractors, as canonical dumps (5.5) |
+| `osmpoi`, `osmpoint`, `osmarea`, `osm`, `ta`, `terrain` | the six layer compilers (5.6) |
 
-```
-header MD5 (device-bound): True | generic: False
-NNN records written, 0 failed      (for ta: 1 failed = the extra table, see above)
+`osmarea`, `osm`, `ta` and `terrain` need libgeos, opened at run time (`src/geos.rs`), so
+building the binary itself needs nothing but a Rust toolchain. The elevation data for
+`terrain` and for the ascents of the routing graph comes from `tools/dem_heights.py` and
+`tools/heights_export.py`, the only Python left (`requirements.txt`).
+
+The device's serial number sits in one place: `DEVICE` in `rust/src/chart.rs`, overridable
+with the environment variable `TEASI_DEVICE`. Every function with a `device` parameter takes
+it as the default.
+
+### 5.1 Reading and decrypting maps
+
+`teasi info` prints the header, `teasi dump` decrypts every record of a file and writes them
+out as individual files:
+
+```bash
+teasi dump 2013021200000368/7/943/20317/Denmark_osm.v20210916 out/osm
 ```
 
 File names: `out/osm/<x>_<y>_<offset-within-the-tile-in-hex>.bin`. That is the decompressed
 plaintext (`pltx` bytes). The serial number comes from `DEVICE` (`TEASI_DEVICE`, see
 section 5).
 
-**As a module:**
+**As a library** (`chart.rs`):
 
-```python
-import sys; sys.path.insert(0, "tools")
-from chart import tiles, records, decode_record, global_key, header_md5
+```rust
+use teasi::chart::{self, Chart};
 
-d   = open("2013021200000368/7/943/20317/Denmark_osmpoi.v20210915", "rb").read()
-dev = b"2013021200000368"
-K   = global_key(dev)
+let c = Chart::open("2013021200000368/7/943/20317/Denmark_osmpoi.v20210915")?;
+assert!(c.bound(&chart::device()));            // check the header checksum
 
-assert header_md5(d, dev) == d[0x34:0x44]         # check the header checksum
-
-for x, y, start, end in tiles(d):                  # the tile directory
-    blob = d[start + 0x157C : start + 0x159C]
-    for rel, ln, pltx, payload in records(d, start, end):
-        raw = decode_record(payload, pltx, blob, K)   # bytes or None
+for t in c.tiles() {                            // the tile directory
+    for r in chart::records(&c.data, t.start, t.end) {
+        let raw = c.record(&t, &r)?;            // plaintext of one record
+    }
+}
 ```
 
-| Function | Purpose |
+| Item | Purpose |
 |---|---|
-| `tiles(d)` | yields `(x, y, start, end)` for every tile |
-| `records(d, start, end)` | yields `(rel_offset, len, pltx, payload)` along the record chain from `+0x159C` |
-| `decode_record(payload, pltx, blob, K)` | PC1 → partial PC1 → LZMA, otherwise LZMA alone; `None` on failure |
-| `lzma_unpack(buf, size)` | the LZMA step alone |
+| `Chart::open(path)` | read a file, check the magic, keep the bytes in `.data` |
+| `c.date()`, `c.typ()`, `c.layer()`, `c.country()`, `c.extra()` | the header fields |
+| `c.bound(device)`, `c.generic()` | is the MAC right, device-bound or generic (section 2) |
+| `c.tiles()` / `tiles(d)` | the tile directory as `Tile { x, y, start, end }` |
+| `records(d, start, end)` | the record chain from `+0x159C` as `Rec { rel, len, pltx, .. }` |
+| `c.record(&tile, &rec)` | the plaintext: PC1 → partial PC1 → LZMA, otherwise LZMA alone |
+| `decode_record(payload, pltx, rk)` | the same step with the record key passed in |
+| `record_key(d, tile_start, K)` | the tile's 32-byte key, decrypted with K |
 | `global_key(device_id)` | the key K per section 4 |
-| `header_md5(d, device=b"")` | the MAC per section 2 (without `device` = generic) |
+| `header_md5(d, device)` | the MAC per section 2 (empty `device` = generic) |
+| `package_md5(d)` | the checksum `packages.xml` carries (5.4) |
 | `SECRET`, `STATIC_KEY`, `KNOWN_PREFIXES` | constants from the firmware |
 
-### 5.2 `tools/pc1.py`: PC1 encryption
-
-```python
-from pc1 import decrypt_blob, encrypt_blob, decrypt_payload, encrypt_payload
-```
+### 5.2 `pc1.rs`: PC1 encryption
 
 | Function | Purpose |
 |---|---|
 | `decrypt_blob(blob, key)` / `encrypt_blob(data, key)` | every byte (for the 32 B tile blob) |
 | `decrypt_payload(data, key)` / `encrypt_payload(data, key)` | partial: 0..99, then every 10th byte |
-| `PC1(key)` | the low-level class with `dec_byte()` / `enc_byte()` |
+| `Pc1::new(key)` | the low-level state with `dec_byte()` / `enc_byte()` |
 
-The implementation is checked against the emulated ARM code (`attic/seed_hunt.py`, Unicorn):
-the results are byte-identical.
+The implementation was checked against the emulated ARM code (Unicorn): the results are
+byte-identical. `rust/tests/compat.rs` keeps the fixtures.
 
-### 5.3 `tools/writer.py`: writing maps
+### 5.3 `writer.rs`: writing maps
 
-The inverse of `chart.py`: out of the plaintext records per tile and slot, `write_chart`
+The inverse of `chart.rs`: out of the plaintext records per tile and slot, `write_chart`
 builds a complete file. That includes tile heads with their slots, empty cell tables and a
 new record key per tile. The records are packed with LZMA and encrypted with PC1, except in
 slot area B. `write_chart` fills the header with the buffer sizes, a new salt and the
 device-bound MAC.
 
-```python
-import sys; sys.path.insert(0, "tools")
-from writer import write_chart
+```rust
+use teasi::writer::{write_chart, Meta, TileContent};
 
-meta  = {"date": b"20260918", "type": 1, "layer": 8, "country": 4}      # osmpoi
-tiles = [(tx, ty, {"D": {slot: plaintext, ...}}, b""), ...]           # in directory order
-d = write_chart(meta, tiles, device=b"2013021200000368")               # bind=False: generic
+let meta = Meta { date: b"20260918".to_vec(), typ: 1, layer: 8, country: 4,
+                  tail_tile: None };                                   // osmpoi
+let d = write_chart(&meta, &tiles, b"2013021200000368", true, None)?;  // false: generic
 ```
 
 - Within a tile the records come in the order A, B, C, D, each sorted by slot, as in the
   original.
-- A `tiles` entry `(x, y, None, b"")` = an empty placeholder tile (like `(0,0)` in osmarea).
-  The ta extra table is passed as `tail`, together with `meta["tail_tile"] = (x, y)`.
-- LZMA: `lzma.compress` (liblzma) appends an end marker, which the originals do not have.
-  That does not matter: the firmware uses an unmodified `LzmaDecode` from the LZMA SDK 9.x
+- A `TileContent` with `areas: None` = an empty placeholder tile (like `(0,0)` in osmarea).
+  The ta extra table is passed as `tail`, together with `meta.tail_tile`.
+- LZMA: the encoder appends an end marker, which the originals do not have. That does not
+  matter: the firmware uses an unmodified `LzmaDecode` from the LZMA SDK 9.x
   (`FUN_0037be30`, props `5D 00 00 00 01`), which stops after `pltx` bytes and then returns 0
   (OK); 0 and 6 are accepted.
-- The tiles are built in parallel. osm takes about 70 s, because PC1 runs in pure Python.
+- The tiles are built in parallel.
 
-**Round trip** (`tools/roundtrip.py <file> [<out>]`): the file is decrypted completely,
-rebuilt and read again. What gets checked is that every record has the same plaintext, that
-the MAC is right, and that the directory, the extra data and the header fields `0x44`–`0x57`
-agree. The result (2026-09-18) for all five vector layers: **14,185 records identical**, with
-the pltx buffer sizes equal to the original's.
+**Round trip** (`teasi roundtrip <file> [<out>]`): the file is decrypted completely, rebuilt
+and read again. What gets checked is that every record has the same plaintext, that the MAC
+is right, and that the directory, the extra data and the header fields `0x44`–`0x57` agree.
+The result for all five vector layers: **14,185 records identical**, with the pltx buffer
+sizes equal to the original's. `teasi check` does the same for several files at once.
 
 A test package for the device is in `build/test1/`: every layer rebuilt, with the POI
 "Tivoli" (Copenhagen) renamed to "Tivoli TEASI-TEST" in osmpoi. **Tested on the device
@@ -368,7 +371,7 @@ A test package for the device is in `build/test1/`: every layer rebuilt, with th
 whole chain (PC1, LZMA with the end marker, new record keys, the device-bound MAC).
 `packages.xml` has to be updated as well, see 5.4.
 
-### 5.4 Getting it onto the device: `packages.xml` and `tools/packages.py`
+### 5.4 Getting it onto the device: `packages.xml`
 
 The Teasi presents itself over USB as mass storage ("SiRF GPS HH", Windows CE). The storage
 only becomes readable after **confirming the connection on the display**; before that it
@@ -403,23 +406,27 @@ first, into `build/device_backup/` for instance):
 ```bash
 C=/run/media/$USER/TFAT/BikeNav
 cp build/test1/Denmark_osm.v20210916 $C/Map/Countries/
-.venv/bin/python tools/packages.py $C/packages.xml $C/Map/Countries/Denmark_osm.v20210916
+teasi info $C/Map/Countries/Denmark_osm.v20210916     # prints size and md5
 ```
 
-`packages.py` changes only the `<md5>` and `<size>` of the matching `<file>` entries (matched
-by the end of `<url>`). **Files without an entry** are not checked but are loaded anyway: the
-firmware reads every `*.v*` in `Countries` (which is how the Great Britain files run, 5.7).
-With the entries updated the message disappears (checked on the device, 2026-09-18).
+Put those two numbers into the `<size>` and `<md5>` of the entry whose `<url>` ends in that
+file name. **Files without an entry** are not checked but are loaded anyway: the firmware
+reads every `*.v*` in `Countries` (which is how the Great Britain files run, 5.7). With the
+entries updated the message disappears (checked on the device, 2026-09-18).
 
-### 5.5 `tools/osm_extract.py`: OSM reference data
+### 5.5 The OSM extractors
 
-Reads a Geofabrik extract and stores every relevant way (roads, paths, watercourses,
-railways, land use …) with its tags, node ids and coordinates in Teasi units (360°/2²⁸),
-along with the cycle and walking route relations per way. For Denmark that takes about a
-minute.
+Each compiler reads its own objects out of a Geofabrik extract: `way.rs` the roads, paths,
+watercourses, railways and land use with their tags, node ids and coordinates in Teasi units
+(360°/2²⁸) plus the cycle and walking route relations per way, `addr.rs` the addresses and
+places, `poi.rs` the POI and seamark candidates, `area.rs` the areas and the coastline, and
+`land.rs` the worldwide land polygons. The compilers call them directly; `teasi ways`,
+`addr`, `poi`, `area` and `land` run one on its own and write a canonical dump, which is
+what the output of two runs can be compared with. For Denmark the way extractor takes 5.5 s
+for 1,114,606 ways.
 
 ```bash
-.venv/bin/python tools/osm_extract.py osm_ref/denmark-220101.osm.pbf osm_ref/dk_ways.pkl
+teasi ways osm_ref/denmark-220101.osm.pbf out/dk_ways.txt
 ```
 
 The extract `osm_ref/denmark-220101.osm.pbf` (as of 2022-01-01, the closest one to the maps
@@ -429,14 +436,14 @@ against `round(X_osm)`.
 
 ### 5.6 Compilers: layers from current OSM data
 
-| Layer | Tools | Status |
+| Layer | Command | Status |
 |---|---|---|
-| osmpoi | `osm_poi_extract.py` → `compile_osmpoi.py` | finished, calibrated against the original, see [OSMPOI_FORMAT.md](OSMPOI_FORMAT.md) "Building it from OSM" |
-| osmpoint | `osm_poi_extract.py` → `compile_osmpoint.py` | finished, calibrated against the original, see [OSMPOINT_FORMAT.md](OSMPOINT_FORMAT.md) "Building it from OSM" |
-| osmarea | `osm_area_extract.py` → `compile_osmarea.py` | finished, calibrated against the original, see [OSMAREA_FORMAT.md](OSMAREA_FORMAT.md) "Building it from OSM" (needs `shapely`); the sea outside the boundary and the Faroe Islands come from the original file |
-| osm | `osm_extract.py` (+ `osm_heights.py`) → `compile_osm.py` | finished, calibrated against the original, see [OSM_FORMAT.md](OSM_FORMAT.md) "Building it from OSM"; with left turns and ascents in the routing graph; the Faroe Islands from the original file; the map is OK on the device |
-| ta | `osm_addr_extract.py` (+ the streets from `osm_extract.py`) → `compile_ta.py` | address search: places, streets, house numbers, postcode districts and the search index, calibrated against the original, see [TA_FORMAT.md](TA_FORMAT.md) "Building it from OSM"; checked offline with `ta_lookup.py` |
-| terrain | `dem_heights.py` (+ `land_extract.py`, `osm_area_extract.py`) → `compile_terrain.py` | elevation model (the elevation profile) and map images (a hillshade coloured by land cover), see [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md) |
+| osmpoi | `teasi osmpoi` | finished, calibrated against the original, see [OSMPOI_FORMAT.md](OSMPOI_FORMAT.md) "Building it from OSM" |
+| osmpoint | `teasi osmpoint` | finished, calibrated against the original, see [OSMPOINT_FORMAT.md](OSMPOINT_FORMAT.md) "Building it from OSM" |
+| osmarea | `teasi osmarea` | finished, calibrated against the original, see [OSMAREA_FORMAT.md](OSMAREA_FORMAT.md) "Building it from OSM"; the sea outside the boundary and the Faroe Islands come from the original file |
+| osm | `teasi osm` | finished, calibrated against the original, see [OSM_FORMAT.md](OSM_FORMAT.md) "Building it from OSM"; with left turns and ascents in the routing graph (`--heights`); the Faroe Islands from the original file; the map is OK on the device |
+| ta | `teasi ta` | address search: places, streets, house numbers, postcode districts and the search index, calibrated against the original, see [TA_FORMAT.md](TA_FORMAT.md) "Building it from OSM"; the search itself was replayed offline against the firmware's semantics (TA_FORMAT.md, "Search index") and then tested on the device |
+| terrain | `teasi terrain` | elevation model (the elevation profile) and map images (a hillshade coloured by land cover), see [TERRAIN_FORMAT.md](TERRAIN_FORMAT.md); the heights come from `tools/dem_heights.py` |
 
 Every compiler takes `--country=N`; osm and osmarea also run without an original file (`-`),
 see 5.7.
@@ -444,7 +451,7 @@ see 5.7.
 The procedure per layer: run the compiler on `denmark-220101` and compare object by object
 with the original file (calibrating the rules), then switch to `denmark-latest`. The file
 names stay as they were, so that `packages.xml` only needs new sizes and MD5s (5.4); the date
-in the header is the date of creation. `tools/poly.py` reads the Geofabrik boundary
+in the header is the date of creation. `poly.rs` reads the Geofabrik boundary
 (`osm_ref/denmark.poly`), and the compilers only take objects inside it. The Faroe Islands
 are not part of the Geofabrik extract and are therefore missing from the newly built layers.
 
@@ -457,11 +464,16 @@ osmdata.openstreetmap.de and the Copernicus DEM. terrain
 (`GreatBritain_terrain.v20260919`) and ta (`GreatBritain_ta.v20260919`, the address search)
 are produced as well, see below.
 
-| Step | Command (details in the layer documents) | Time | RAM |
+Every layer is one command from the 2.2 GB extract straight into the chart file; the
+details are in the layer documents.
+
+| Step | Command | Time | RAM |
 |---|---|---:|---:|
-| POIs | `osm_poi_extract.py --filter` → `compile_osmpoi.py --country=17` / `compile_osmpoint.py --country=17` | 24 + 1 min | 6 GB |
-| Streets | `osm_extract.py --filter`, `dem_heights.py`, `compile_osm.py --country=17 "--name=United Kingdom" … -` | 12 + 1 + 18 min | 18 GB |
-| Areas | `osm_area_extract.py`, `land_extract.py`, `compile_osmarea.py --country=17 --land=… -` | 10 + 12 min | 15 GB |
+| POIs | `teasi osmpoi … --country=17` / `teasi osmpoint …` | 35 + 17 s | 0.9 GB |
+| Areas | `teasi osmarea … - --country=17 --land=…` | 3:10 | 7.1 GB |
+| Streets | `teasi osm --heights=… --country=17 "--name=United Kingdom" … -` | 4:13 | 16.0 GB |
+| Addresses | `teasi ta --country=17 "--name=United Kingdom" …` | 3:19 | 13.7 GB |
+| Elevation | `teasi terrain --country=17 --land=… --area=… …` | 1:24 | 7.9 GB |
 
 The result: osm 531 MB (12.1 M graph nodes, 30 M edges, 57 % with an ascent, 33 % of the
 nodes with left turns), osmarea 83 MB, osmpoi 17 MB (750,000 POIs), osmpoint 0.5 MB (12,561
@@ -474,10 +486,11 @@ routing footpaths, for instance).
 
 **terrain (2026-09-19):** without a terrain file the elevation profile of a tour shows
 nothing. `GreatBritain_terrain.v20260919` (37 MB, 85 regions) holds the elevation tiles from
-`build/gb/dem.pkl` plus the map images:
+`build/gb/dem.bin` (the export of `tools/dem_heights.py`) plus the map images:
 ```bash
-.venv/bin/python tools/compile_terrain.py --land=build/gb/land.pkl --area=build/gb/area.pkl \
-    build/gb/dem.pkl osm_ref/great-britain.poly build/gb/GreatBritain_terrain.v20260919 20260919   # ~2 min, 10 GB
+teasi terrain --country=17 --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
+    --area=osm_ref/great-britain-latest.osm.pbf \
+    build/gb/dem.bin osm_ref/great-britain.poly build/gb 20260919     # 1:24, 7.9 GB
 ```
 The map images are a hillshade, coloured by water and land cover (the OSM areas); Ireland and
 France at the edge get the relief only. Reading the heights back: Ben Nevis 1292 m (really
@@ -489,9 +502,8 @@ OK too (2026-09-19).
 **ta (2026-09-19):** the address search with a country-wide place index. Without this file
 the search only finds places and streets near the current position.
 ```bash
-.venv/bin/python tools/osm_addr_extract.py osm_ref/great-britain-latest.osm.pbf build/gb/addr.pkl   # ~20 min
-.venv/bin/python tools/compile_ta.py --cache=build/gb/ta_cache.pkl --country=17 "--name=United Kingdom" \
-    build/gb/ways.pkl build/gb/addr.pkl osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919  # 4 min with the cache
+teasi ta --country=17 "--name=United Kingdom" osm_ref/great-britain-latest.osm.pbf \
+    osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919    # 3:19, 13.7 GB
 ```
 114 MB. House numbers only exist where OSM has addresses (5 of about 30 M). The details and
 the checks are in [TA_FORMAT.md](TA_FORMAT.md). **Tested on the device (2026-10-07):**
@@ -503,17 +515,20 @@ searching a place, a street and a house number works, and so does routing across
 The headless scripts are in `ghidra_scripts/`, and how to call them with which arguments is
 in [../ghidra_scripts/README.md](../ghidra_scripts/README.md). `bikenav.exe` was analysed in
 a Ghidra project of its own (Ghidra 12); the one-off searches from the analysis phase are in
-`attic/ghidra/`.
+`ghidra_scripts/hunts/`.
 
 Code that Ghidra has not assigned to a function is only found by `InsnGrep` (`in ?` in its
 output). That is where the key initialisation sits (`0x1fd148`), for instance. Such places
 can be disassembled with Capstone.
 
-### 5.9 The Rust port (`rust/`)
+### 5.9 How it was verified
 
-The shell exists in Rust as well: PC1, the header MAC, raw LZMA1, the containers A/B/C/D and
-osmpoint, the writer and the search index (`ta_index.rs`). The Python tools remain the
-reference, and the port is checked against them:
+Everything described above was first written in Python and then ported to Rust module by
+module, with the Python output as the reference at every step: the shell (PC1, the header MAC,
+raw LZMA1, the containers A/B/C/D and osmpoint, the writer, the search index), reading OSM,
+and all six compilers. Once every layer agreed the reference was removed; it is in the
+history up to commit `fc17505`. The record of what agreed with what is this section, and the
+checks that do not need the reference are still here:
 
 ```bash
 cd rust && cargo build --release
@@ -530,10 +545,10 @@ the end marker gets in the way), and the containers have to pass the fields nobo
 understands straight through.
 
 Reading OSM is ported too (`pbf.rs`: the PBF reader and the node index, `addr.rs`:
-`osm_addr_extract.py`). For Denmark it delivers all 2,628,399 entries **bit-identically**, in
+the address extractor). For Denmark it delivers all 2,628,399 entries **bit-identically**, in
 4.7 instead of 270 s; for Great Britain 5,023,341 of 5,023,358 addresses and 111,338 of
-111,340 places bit-identically. Checking is done with `rust/scripts/addr_dump.py` and
-`rust/scripts/addr_compare.py` against the pickle.
+111,340 places bit-identically. Both sides wrote the same canonical dump, which was compared
+line by line; `teasi addr <pbf> <out>` still writes it.
 
 That the areas come out right at all is down to libosmium's area assembler, reproduced in
 `pbf.rs`: out of **edges**, which are normalised and sorted and cancel each other out in
@@ -546,7 +561,7 @@ nesting, not by the member role; and `area=no` forbids the area. Without all tha
 All six layer compilers are ported. `poi.rs` reads the candidates for `osmpoi.rs` and
 `osmpoint.rs`, all in one pass over the PBF (Great Britain 35 and 17 s instead of 24 min for
 the extraction alone); for Denmark all 3699 osmpoi and all 128 osmpoint records are
-byte-identical with the Python version, for Great Britain 15,603 of 15,619 osmpoi records and
+byte-identical with the Python output, for Great Britain 15,603 of 15,619 osmpoi records and
 all 354 osmpoint records. `osmarea.rs` (with `area.rs`, `land.rs` and `geos.rs`) builds the
 area layer: 308 of 340 Danish records byte-identical, 1029 of 1157 British ones. What
 deviates are multipolygons with self-touching rings, which libosmium splits differently.
@@ -558,25 +573,23 @@ instead of 18.0 GB. For Denmark 5981 of 5982 records; the one difference is 5 of
 edges with an ascent that differs by 1 cm, because 16 pairs of known node heights sit at the
 same position and carry different heights — which of them enters the mean of the 4 neighbours
 is arbitrary. All 1,538,105 Danish ways come out of the extractor bit-identically, tag tables
-and flags included. The height sources themselves (`osm_heights.py` with scipy's `lsqr`,
-`dem_heights.py` with the Copernicus model) stay in Python; `rust/scripts/heights_export.py`
-writes their pickle into a flat binary file for `--heights=`.
+and flags included.
 
 `ta.rs` (with `grid.rs` instead of scipy's kd-tree) builds the address search together with
 the search index: for Denmark **all 3958 records and the search index are byte-identical**,
 for Great Britain 13,679 of 13,680 records, and both files are the same size down to the byte
 (113,851,396 B) — in 3:19 instead of 4:12 and with 13.7 instead of 16 GB. The one deviation
 is a house number range ending at 149 instead of 147, because the Rust address extractor
-finds two addresses more (the same residue as above). For this, `compile_ta.py` needed three
-changes so that two runs would even produce the same output: addresses, places and
-interpolation lines sorted canonically, a search index node's children sorted by character
-(previously the iteration order of a `set`, so dependent on the hash seed), and a correlation
-below 10⁻¹² counting as zero instead of its last bit deciding the direction of a house number
-range.
+finds two addresses more (the same residue as above). Three things had to change before two
+runs over the same input produced the same output at all: addresses, places and interpolation
+lines are sorted canonically, a search index node's children are sorted by character
+(previously the iteration order of a Python `set`, so dependent on the hash seed), and a
+correlation below 10⁻¹² counts as zero instead of its last bit deciding the direction of a
+house number range.
 
 `terrain.rs` builds the elevation model and the map images. For Denmark as for Great Britain
 **every elevation tile** (1034 and 1999 respectively) is byte-identical with the Python
-version — down to one byte per tile, because OpenJPEG writes its own version into the comment
+output — down to one byte per tile, because OpenJPEG writes its own version into the comment
 marker and Pillow ships a different one. Great Britain takes 1:24 and 7.9 GB and reads the
 PBF and the shapefile itself along the way; Python needs 2 min and 10 GB for the compiler
 alone, plus the three extractions. Three pieces of Pillow sit in `raster.rs`, reproduced line
@@ -586,8 +599,8 @@ The elevation tiles go through OpenJPEG itself (`openjpeg-sys`), because how the
 distributed over the code blocks is a matter of implementation and the device's JP2 decoder is
 undocumented; the map images go through `jpeg-encoder` instead of libjpeg-turbo, which yields
 different bytes and about half the images pixel-identical (mean deviation 0.025 out of 255).
-The comparison is done with `rust/scripts/terrain_compare.py`, because `teasi check` does not
-know this layer — it has no slot areas.
+That comparison ran region by region outside `teasi check`, which does not know this layer —
+it has no slot areas.
 
 ```bash
 ./target/release/teasi osmpoi  <pbf> <poly> <out> [YYYYMMDD] --country=17
@@ -604,13 +617,13 @@ know this layer — it has no slot areas.
 `osmarea`, `osm`, `ta` and `terrain` (with images) need **libgeos** (shapely uses it too, and
 the result is only bit-identical with the same version): `geos.rs` loads the library at
 runtime with `dlopen`, found through `TEASI_GEOS`. The build itself does not need it. One
-change went back into Python: `compile_osmarea.py` now sorts the areas by their osmium id,
-because the extractor's order (libosmium's buffer order) helps decide which polygon comes
-first in a union and cannot be reproduced.
+thing the port forced: the areas are sorted by their osmium id, because the extractor's order
+(libosmium's buffer order) helps decide which polygon comes first in a union and cannot be
+reproduced.
 
-Not yet ported are the height sources themselves: `osm_heights.py` (scipy's `lsqr`) and
-`dem_heights.py` (Copernicus tiles). Rust reads their results through
-`rust/scripts/heights_export.py`.
+**What stays in Python:** the elevation data. `tools/dem_heights.py` downloads the Copernicus
+tiles and resamples them into one grid, `tools/heights_export.py` writes that grid as the flat
+binary file that `teasi terrain` and `teasi osm --heights=` read.
 
 ---
 

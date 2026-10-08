@@ -25,7 +25,7 @@ public class BaseHunt extends GhidraScript {
             println("003542c8 fehlt");
         }
 
-        // 2) Funktionen mit str [r,#0xbc]  (setzen die Basis)
+        // 2) functions with str [r,#0xbc]  (they set the base)
         List<Function> hits = new ArrayList<Function>();
         FunctionIterator fi = fm.getFunctions(true);
         while (fi.hasNext()) {
@@ -42,7 +42,7 @@ public class BaseHunt extends GhidraScript {
                 }
             }
         }
-        println("### funktionen mit str [.,#0xbc]: " + hits.size());
+        println("### functions with str [.,#0xbc]: " + hits.size());
         for (Function g : hits)
             println("--- " + g.getEntryPoint() + " size=" + g.getBody().getNumAddresses());
 

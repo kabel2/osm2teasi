@@ -1,5 +1,5 @@
-//! The osmpoint layer: seamarks from OSM / OpenSeaMap.
-//! Port of tools/compile_osmpoint.py; format in docs/OSMPOINT_FORMAT.md.
+//! The osmpoint layer: seamarks from OSM / OpenSeaMap; format in
+//! docs/OSMPOINT_FORMAT.md.
 //!
 //! The rules were calibrated against the original Danish file, see that
 //! document's "Aus OSM erzeugen".  Everything here reads `seamark:*` tags, whose

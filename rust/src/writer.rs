@@ -1,4 +1,4 @@
-//! Write chart files: the inverse of chart.rs.  Port of tools/writer.py.
+//! Write chart files: the inverse of chart.rs.
 //!
 //! Header fields as read by the chart loader FUN_003f282c (see
 //! docs/CHART_FILES.md 1): 0x44 date, 0x4C type, 0x50 layer,
@@ -180,7 +180,7 @@ pub fn write_chart(
 }
 
 /// Everything needed to rebuild a file: the plaintext of all records per tile
-/// plus each tile's tail.  Port of roundtrip.py's read_all / meta_of.
+/// plus each tile's tail.
 pub fn read_all(c: &chart::Chart) -> Result<(Meta, Vec<TileContent>)> {
     let d = &c.data;
     let tiles = c.tiles();

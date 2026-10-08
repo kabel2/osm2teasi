@@ -1,5 +1,5 @@
 //! Teasi/Tahuna chart files: shell, encryption, record containers and writer.
-//! Rust port of the Python tools in tools/; the formats are documented in docs/.
+//! The formats are documented in docs/.
 
 pub mod addr;
 pub mod area;

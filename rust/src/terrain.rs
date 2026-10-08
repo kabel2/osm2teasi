@@ -1,6 +1,5 @@
 //! The terrain layer (type 5, layer 0x20): the elevation model as JPEG 2000
-//! tiles and the map images as JPEG tiles.  Port of tools/compile_terrain.py;
-//! format in docs/TERRAIN_FORMAT.md.
+//! tiles and the map images as JPEG tiles; format in docs/TERRAIN_FORMAT.md.
 //!
 //! One region covers 1.40625 degrees and holds 8x8 cells of 256x256 px.  A cell
 //! gets an elevation tile if it contains land, and a map image if it touches the
@@ -90,7 +89,7 @@ const WET: u8 = 6;
 const ROCK: u8 = 7;
 const SAND: u8 = 8;
 
-/// `COVER` of compile_terrain.py: the land cover class of one tag, or `None`.
+/// The land cover class of one tag, or `None`.
 /// An area with several of these keys takes the first one in tag order, which is
 /// why [`crate::area::ATags`] remembers the result instead of the tags.
 pub fn cover_class(k: &str, v: &str) -> Option<u8> {
@@ -117,7 +116,7 @@ pub fn cover_class(k: &str, v: &str) -> Option<u8> {
 /// Port of `sample()`, including its zeroing outside the grid.
 fn sample(g: &Heights, lat: &[f64], lon: &[f64]) -> Result<Vec<f64>> {
     let Heights::Grid { rows, cols, lon0, lat0, step, z } = g else {
-        bail!("the terrain layer needs an elevation grid (dem_heights.py), not node heights");
+        bail!("the terrain layer needs an elevation grid (tools/dem_heights.py), not nodes");
     };
     let rs: Vec<(usize, f64)> = lat
         .iter()

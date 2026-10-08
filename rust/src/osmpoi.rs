@@ -1,5 +1,5 @@
 //! The osmpoi layer: tag rules, attribute string and the finished chart.
-//! Port of tools/compile_osmpoi.py; format in docs/OSMPOI_FORMAT.md.
+//! Format in docs/OSMPOI_FORMAT.md.
 
 use std::collections::HashMap;
 
@@ -18,8 +18,8 @@ pub const DEDUP: i64 = 500; // same type + name closer than this: keep one
 // the tags the rules and the attribute string look at
 // --------------------------------------------------------------------------
 
-/// Index into [`Tags`].  Only the keys the layer actually reads; the wider KEYS
-/// list of tools/osm_poi_extract.py is a superset used for unfiltered extracts.
+/// Index into [`Tags`].  Only the keys the layer actually reads; the extractor
+/// keeps a wider set for unfiltered extracts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum K {
     Amenity,

@@ -1,5 +1,5 @@
 //! The search index of the ta layer: the extra table behind header 0x70.
-//! Port of tools/ta_index.py; format in docs/TA_FORMAT.md ("Suchindex").
+//! Format in docs/TA_FORMAT.md ("Suchindex").
 //!
 //! The firmware registers it per country (FUN_0016068c) and walks it for the
 //! place search (FUN_00162788, FUN_00163384, FUN_0016201c).  All offsets are
@@ -12,7 +12,7 @@ use anyhow::{ensure, Result};
 /// Language mask "all languages".
 pub const ALL: u64 = u64::MAX;
 
-/// Search key normalisation, `fold()` in tools/ta_index.py: lower case,
+/// Search key normalisation: lower case,
 /// Danish letters spelled out, accents dropped.
 pub fn fold(s: &str) -> String {
     use unicode_normalization::char::canonical_combining_class;

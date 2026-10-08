@@ -1,7 +1,9 @@
-//! Compatibility with the Python tools.  The reference values come from
-//! tools/pc1.py and tools/chart.py; the full test is `teasi check <chart>`
-//! over the original files, which needs chart data and therefore lives in the
-//! CLI rather than here.
+//! Fixtures for the pieces that have to agree bit for bit with something
+//! outside this crate.  The expected values were taken, while porting, from the
+//! firmware's own output, from the Python reference implementation this port
+//! replaces, and from Pillow 12.3 / numpy 2.5; they are frozen here.  The full
+//! test is `teasi check <chart>` over the original files, which needs chart
+//! data and therefore lives in the CLI rather than here.
 
 use md5::{Digest, Md5};
 use teasi::{chart, layers, lzma, osmpoi, pc1, ta_index};
@@ -130,7 +132,7 @@ fn hex(b: &[u8]) -> String {
 
 #[test]
 fn teasi_units_match_python() {
-    // reference values from tools/osm_addr_extract.py (SCALE = 2**28 / 360)
+    // reference values from the Python side (SCALE = 2**28 / 360)
     for (dm_lon, dm_lat, bx, by) in [
         (102345678i32, 553456789i32, 0x41a0e8e4adbf157fu64, 0x4178a4a06af89798u64),
         (-17654321, 603456789, 0x419fafa739a863bc, 0x41751667876a5eb5),
@@ -248,7 +250,7 @@ fn probe_finds_the_same_ids_as_a_binary_search() {
 }
 
 // --------------------------------------------------------------------------
-// osmpoi (tools/compile_osmpoi.py)
+// osmpoi
 // --------------------------------------------------------------------------
 
 fn tags<'a>(pairs: &'a [(&'a str, &'a str)]) -> osmpoi::Tags<'a> {
@@ -333,7 +335,7 @@ fn poly_contains_counts_holes() {
 }
 
 // --------------------------------------------------------------------------
-// osmpoint (tools/compile_osmpoint.py); all expected values printed by it
+// osmpoint; all expected values printed by the Python side
 // --------------------------------------------------------------------------
 
 fn seamark(pairs: &[(&str, &str)]) -> teasi::pbf::TagMap {
@@ -556,7 +558,7 @@ fn geos_strtree_order_matches_shapely() {
     assert_eq!(hit, vec![3, 5, 7, 1, 9, 4, 8, 0, 6, 2]);
 }
 
-/// The tables of tools/compile_osmarea.py's area_class, spot-checked.
+/// The area_class tables, spot-checked.
 #[test]
 fn area_class_matches_python() {
     use teasi::area::ATags;
@@ -641,7 +643,7 @@ fn wtags(pairs: &[(&str, &str)]) -> teasi::pbf::TagMap {
     teasi::pbf::TagMap::of(pairs.iter().copied())
 }
 
-/// Values from tools/compile_osm.py: road_class, flags with and without route
+/// Reference values: road_class, flags with and without route
 /// relations, passable and category.
 #[test]
 fn road_attributes_match_python() {
@@ -789,7 +791,7 @@ fn name_table_matches_python() {
 // the ta layer: house numbers, postcodes, cell cutting and the index keys
 // --------------------------------------------------------------------------
 
-/// Values from tools/compile_ta.py.
+/// Reference values for the address layer.
 #[test]
 fn house_numbers_match_python() {
     use teasi::ta::house_numbers;
@@ -883,8 +885,8 @@ fn index_keys_match_python() {
     assert_eq!(teasi::ta::keys("\u{c5}rhus"), ["arhus"]);
 }
 
-/// A tiny generator both sides share, so that the shapes in the next test are
-/// the ones scripts/raster_ref.py drew with PIL.
+/// A tiny generator the Python reference shared, so that the shapes in the
+/// next test are the ones PIL drew when the md5s below were taken.
 struct Lcg(u64);
 
 impl Lcg {

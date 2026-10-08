@@ -16,12 +16,12 @@ usage: teasi <command> [arguments]
 
   info <chart>...            header, tiles and record counts
   dump <chart> <out-dir>     write every decrypted record to a file
-  md5s <chart>               'area cx cy md5' per record (to compare with Python)
+  md5s <chart>               'area cx cy md5' per record (to compare two charts)
   check <chart>...           parse and rebuild every record; must be byte-identical
   roundtrip <chart> [out]    decode the whole file, write it again, compare records
   index <ta chart|table>     search index: parse, rebuild and compare
   addr <file.osm.pbf> [out]  addresses, places and interpolation ways from OSM
-                             (out: canonical dump to compare with Python)
+                             (out: one sorted line per address, places and ways)
   poi <file.osm.pbf> <out>   POI candidates as a canonical dump
   osmpoi <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD] [--country=N]
   osmpoint <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD] [--country=N]
@@ -38,14 +38,14 @@ usage: teasi <command> [arguments]
   ways <file.osm.pbf> <out>  the road and line ways as a canonical dump
   osm <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]
                              compile the street layer; --heights=<file> adds the
-                             ascents (scripts/heights_export.py), --name=<country>
+                             ascents (tools/heights_export.py), --name=<country>
                              the country name of the A records (needs libgeos)
   ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]
                              compile the address search incl. its search index
                              (--country=N, --name=<country>; needs libgeos)
   terrain <heights> <area.poly> <out chart> [YYYYMMDD]
                              compile the elevation model (heights from
-                             scripts/heights_export.py); --land=<land_polygons.shp>
+                             tools/heights_export.py); --land=<land_polygons.shp>
                              --area=<file.osm.pbf> add the map images (needs
                              libgeos), --rate=R the compression ratio,
                              --only=x,y builds a single region
@@ -114,6 +114,11 @@ fn info(path: &str) -> Result<()> {
         "  MAC: device-bound {} | generic {}",
         c.bound(&chart::device()),
         c.generic()
+    );
+    println!(
+        "  packages.xml: size {} md5 {:x}",
+        c.data.len(),
+        chart::package_md5(&c.data)
     );
     let mut counts: BTreeMap<char, usize> = BTreeMap::new();
     for t in tiles.iter().filter(|t| t.start != t.end) {
@@ -224,7 +229,6 @@ fn check(path: &str) -> Result<bool> {
 }
 
 /// Decode a file, rebuild it with the writer and compare record by record.
-/// Port of tools/roundtrip.py.
 fn roundtrip(path: &str, out: Option<&str>) -> Result<bool> {
     let c = Chart::open(path)?;
     let dev = chart::device();
@@ -342,9 +346,9 @@ fn bits(v: f64) -> String {
     format!("{:016x}", v.to_bits())
 }
 
-/// Extract addresses from a .osm.pbf.  With `out`, write the canonical dump
-/// that scripts/addr_dump.py produces from the Python pickle, so the two can be
-/// compared line by line.
+/// Extract addresses from a .osm.pbf.  With `out`, write a canonical dump: one
+/// sorted line per address, place and interpolation way, stable enough to diff
+/// two extracts against each other.
 fn addr(path: &str, out: Option<&str>) -> Result<bool> {
     let t0 = std::time::Instant::now();
     let ex = teasi::addr::extract(path, &|s| println!("  {}", s))?;
@@ -406,8 +410,8 @@ fn addr(path: &str, out: Option<&str>) -> Result<bool> {
     Ok(true)
 }
 
-/// POI candidates as the canonical dump scripts/poi_dump.py writes from the
-/// Python pickle, so the two can be compared line by line.
+/// POI candidates as a canonical dump: one sorted line each, stable enough to
+/// diff two extracts against each other.
 fn poi(path: &str, dst: &str) -> Result<bool> {
     let t0 = std::time::Instant::now();
     let cands = teasi::poi::extract(path, &|s| println!("  {}", s))?;
@@ -444,9 +448,8 @@ fn poi(path: &str, dst: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Compile the osmpoi or osmpoint layer from a .osm.pbf.  Ports of
-/// tools/compile_osmpoi.py and tools/compile_osmpoint.py; both read the same
-/// candidates, so one pass over the file serves either.
+/// Compile the osmpoi or osmpoint layer from a .osm.pbf.  Both layers read
+/// the same candidates, so one pass over the file serves either.
 fn compile_poi(layer: &str, args: &[String], country: u32) -> Result<bool> {
     if args.len() < 3 {
         bail!("usage: teasi {} <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]", layer);
@@ -482,8 +485,8 @@ fn compile_poi(layer: &str, args: &[String], country: u32) -> Result<bool> {
     Ok(true)
 }
 
-/// Canonical dump of the areas and the coastline, to compare with the Python
-/// pickle (rust/scripts/area_dump.py + area_compare.py).
+/// Canonical dump of the areas and the coastline: one line each, with the ring
+/// coordinates hashed, stable enough to diff two extracts against each other.
 fn area(path: &str, dst: &str) -> Result<()> {
     let ex = teasi::area::extract(path, &|s| println!("  {}", s))?;
     let mut out = std::io::BufWriter::new(std::fs::File::create(dst)?);
@@ -533,8 +536,7 @@ fn area(path: &str, dst: &str) -> Result<()> {
     Ok(())
 }
 
-/// Count and total area of the land polygons around a boundary, to compare with
-/// tools/land_extract.py.
+/// Count and total area of the land polygons around a boundary.
 fn land(shp: &str, area: &str) -> Result<()> {
     teasi::geos::available()?;
     let l = teasi::land::extract(shp, &teasi::poly::load(area)?)?;
@@ -547,7 +549,7 @@ fn land(shp: &str, area: &str) -> Result<()> {
     Ok(())
 }
 
-/// Canonical dump of the way extractor, to compare with the Python pickle.
+/// Canonical dump of the way extractor: one line per way, nodes hashed.
 fn ways(path: &str, dst: &str) -> Result<()> {
     let w = teasi::way::extract(path, &|s| println!("  {}", s))?;
     let mut out = std::io::BufWriter::new(std::fs::File::create(dst)?);

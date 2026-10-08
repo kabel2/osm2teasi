@@ -14,7 +14,7 @@ public class FindCtx extends GhidraScript {
         dci.setOptions(new DecompileOptions());
         FunctionManager fm = currentProgram.getFunctionManager();
 
-        // Funktionen die #0x1a0 UND #0xbc benutzen
+        // functions that use both #0x1a0 and #0xbc
         List<Function> both = new ArrayList<Function>();
         List<Function> only1a0 = new ArrayList<Function>();
         FunctionIterator fi = fm.getFunctions(true);
@@ -31,11 +31,11 @@ public class FindCtx extends GhidraScript {
             if (a && b) both.add(g);
             else if (a) only1a0.add(g);
         }
-        println("### funktionen mit 0x1a0 UND 0xbc: " + both.size());
+        println("### functions with 0x1a0 AND 0xbc: " + both.size());
         for (Function g : both)
             println("--- BOTH " + g.getEntryPoint()
                     + " size=" + g.getBody().getNumAddresses());
-        println("### funktionen mit 0x1a0 (alle): " + only1a0.size());
+        println("### functions with 0x1a0 (all): " + only1a0.size());
         for (Function g : only1a0)
             println("--- 1A0  " + g.getEntryPoint()
                     + " size=" + g.getBody().getNumAddresses());

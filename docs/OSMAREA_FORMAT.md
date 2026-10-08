@@ -1,8 +1,8 @@
 # osmarea format (`Denmark_osmarea.v20210810`)
 
 As of 2026-09-18. **Container and semantics understood, compiler finished** (section
-"Building it from OSM", runtime ~4 min). **Container fully understood**: `parse_c`/`build_c`
-in `tools/layers.py` rebuild all 368 records byte-identically. The area classes were
+"Building it from OSM", runtime 61 s). **Container fully understood**: `parse_c`/`build_c`
+in `layers.rs` rebuild all 368 records byte-identically. The area classes were
 assigned by matching against OSM (`denmark-220101.osm.pbf`).
 
 Content: **areas** (land use, forest, water, built-up land …) as polygons, plus area
@@ -146,41 +146,32 @@ field, so the value does not matter.
 
 ## Building it from OSM
 
+One command from the extract to the chart file; it needs libgeos, see
+[../rust/README.md](../rust/README.md):
+
 ```bash
-.venv/bin/python tools/osm_area_extract.py osm_ref/denmark-latest.osm.pbf build/ref/area_latest.pkl   # ~1 min
-.venv/bin/python tools/compile_osmarea.py build/ref/area_latest.pkl osm_ref/denmark.poly \
-    2013021200000368/7/943/20317/Denmark_osmarea.v20210810 build/<dir>/Denmark_osmarea.v20210810 [YYYYMMDD]  # ~4 min
+teasi osmarea osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+    2013021200000368/7/943/20317/Denmark_osmarea.v20210810 \
+    build/<dir>/Denmark_osmarea.v20210810 [YYYYMMDD]      # 61 s
 ```
 
 **Countries without an original file** (Great Britain, say): pass `-` instead of the
 original, and the sea then comes entirely from the worldwide land polygons of
 osmdata.openstreetmap.de (`land-polygons-split-4326`, built from the whole world's
-`natural=coastline`), clipped with `tools/land_extract.py` (needs `pyshp`). Sea = the cell
-minus the land in every tile that touches the boundary, so the coasts of the neighbouring
-countries are included too (France at Dover, for instance). Details and runtimes:
+`natural=coastline`), read by `land.rs` straight from the shapefile. Sea = the cell minus
+the land in every tile that touches the boundary, so the coasts of the neighbouring countries
+are included too (France at Dover, for instance). Details and runtimes:
 [CHART_FILES.md](CHART_FILES.md) 5.7.
 
 ```bash
-.venv/bin/python tools/land_extract.py osm_ref/land-polygons-split-4326/land_polygons.shp \
-    osm_ref/great-britain.poly build/gb/land.pkl                                 # ~5 s
-.venv/bin/python tools/compile_osmarea.py --country=17 --land=build/gb/land.pkl \
-    build/gb/area.pkl osm_ref/great-britain.poly - build/gb/GreatBritain_osmarea.v20260918 20260918
+teasi osmarea osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly \
+    - build/gb/GreatBritain_osmarea.v20260918 20260918 --country=17 \
+    --land=osm_ref/land-polygons-split-4326/land_polygons.shp      # 3:10, 7.1 GB
 ```
 
-The same in Rust, with no pickle in between (needs libgeos, see
-[../rust/README.md](../rust/README.md)):
-
-```bash
-cd rust && ./target/release/teasi osmarea osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
-    <original>/Denmark_osmarea.v20210810 build/Denmark_osmarea.v20210810 20210810   # 61 s
-./target/release/teasi osmarea osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly \
-    - build/GreatBritain_osmarea.v20260918 20260918 --country=17 \
-    --land=osm_ref/land-polygons-split-4326/land_polygons.shp
-```
-
-`osm_area_extract.py` stores every area (closed ways and multipolygons, assembled by
-osmium) carrying land-use tags, plus the coastline ways. `compile_osmarea.py` builds the
-layer from them (the original was matched against `denmark-220101`, rules below):
+`area.rs` reads every area (closed ways and multipolygons, assembled the way libosmium does)
+carrying land-use tags, plus the coastline ways. `osmarea.rs` builds the layer from them (the
+original was matched against `denmark-220101`, rules below):
 
 1. **Class** from the tags, `landuse` before `natural`, `leisure`, `man_made`
    (`area_class`):

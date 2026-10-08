@@ -1,5 +1,4 @@
 //! Addresses, places and interpolation ways from a .osm.pbf, for the ta layer.
-//! Port of tools/osm_addr_extract.py.
 //!
 //! Three passes over the file, because a relation's geometry needs its member
 //! ways and those need their nodes:

@@ -1,5 +1,5 @@
 //! Osmosis `.poly` files (a Geofabrik country boundary) and a point-in-polygon
-//! test in Teasi units.  Port of tools/poly.py.
+//! test in Teasi units.
 
 use anyhow::{Context, Result};
 
