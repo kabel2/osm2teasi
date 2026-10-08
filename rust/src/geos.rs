@@ -502,8 +502,18 @@ impl Geom {
     }
 }
 
-/// `shapely.union_all`: one unary union over the whole list.
+/// `shapely.union_all`: one unary union over the whole list.  Where GEOS
+/// throws a TopologyException on an invalid input -- a rectangle clip of
+/// Alaska's coast -- the inputs are made valid first.
 pub fn union_all<'a, I: IntoIterator<Item = &'a Geom>>(gs: I) -> Result<Geom> {
+    let gs: Vec<&Geom> = gs.into_iter().collect();
+    union_of(gs.iter().copied()).or_else(|_| {
+        let valid = gs.iter().map(|g| g.valid()).collect::<Result<Vec<_>>>()?;
+        union_of(valid.iter())
+    })
+}
+
+fn union_of<'a, I: IntoIterator<Item = &'a Geom>>(gs: I) -> Result<Geom> {
     let (a, c) = both();
     let mut ps: Vec<Ptr> = Vec::new();
     for g in gs {
