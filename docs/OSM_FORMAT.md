@@ -297,7 +297,7 @@ Likewise `parse_a`/`build_a`, `parse_b`/`build_b`, `parse_c`/`build_c`.
 ## Building it from OSM
 
 ```bash
-teasi dem osm_ref/denmark.poly osm_ref/dem_dk build/latest/dem.bin           # 43 tiles, 1.2 s cached
+teasi dem osm_ref/denmark.poly osm_ref/dem_dk build/latest/dem.bin           # 44 tiles, 0.6 s cached
 teasi osm --heights=build/latest/dem.bin osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
     2013021200000368/7/943/20317/Denmark_osm.v20210916 \
     build/latest/Denmark_osm.v20210916 20260918            # 66 s
@@ -357,7 +357,7 @@ c2/c4 stay empty and nothing is copied; `--country=N` (the header's country code
 CHART_FILES.md 1), `--name=<country>` (the country name in the A record).
 
 ```bash
-teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin    # 234 tiles, 3.6 s cached
+teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin    # 207 tiles, 1.7 s cached
 teasi osm --heights=build/gb/dem.bin --country=17 "--name=United Kingdom" \
     osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly - \
     build/gb/GreatBritain_osm.v20260918 20260918       # 2:45, 6.4 GB

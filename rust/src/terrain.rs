@@ -115,7 +115,7 @@ pub fn cover_class(k: &str, v: &str) -> Option<u8> {
 /// Bilinear heights of the grid at `lat` (rows) x `lon` (columns), in metres,
 /// zeroed outside the grid.
 fn sample(g: &Heights, lat: &[f64], lon: &[f64]) -> Vec<f64> {
-    let Heights { rows, cols, lon0, lat0, step, z } = g;
+    let Heights { rows, cols, lon0, lat0, step, .. } = g;
     let rs: Vec<(usize, f64)> = lat
         .iter()
         .map(|&la| {
@@ -141,10 +141,10 @@ fn sample(g: &Heights, lat: &[f64], lon: &[f64]) -> Vec<f64> {
                 continue;
             }
             let (c0, fc) = cs[j];
-            let a = f64::from(z[r0 * cols + c0]);
-            let b = f64::from(z[r0 * cols + c0 + 1]);
-            let d = f64::from(z[(r0 + 1) * cols + c0]);
-            let e = f64::from(z[(r0 + 1) * cols + c0 + 1]);
+            let a = f64::from(g.get(r0, c0));
+            let b = f64::from(g.get(r0, c0 + 1));
+            let d = f64::from(g.get(r0 + 1, c0));
+            let e = f64::from(g.get(r0 + 1, c0 + 1));
             *v = (a * (1.0 - fc) + b * fc) * (1.0 - fr) + (d * (1.0 - fc) + e * fc) * fr;
         }
     });
@@ -555,6 +555,20 @@ pub fn build(
     let mut maxlen = 0usize;
     for &x in &xs {
         for &y in &ys {
+            // only the regions that touch the area: the box is the rest of
+            // the neighbours' land, and around the antimeridian the whole
+            // width of the earth
+            let near = match &prep {
+                Some(p) => p.regs.get(&(x, y)).is_some_and(|r| !r.cells.is_empty()),
+                None => {
+                    let (lon_w, lat_n) = (x as f64 * TILE - 180.0, 90.0 - y as f64 * TILE);
+                    let px = TILE / R as f64;
+                    g.covers(lon_w - px, lat_n - TILE - px, lon_w + TILE + px, lat_n + px)
+                }
+            };
+            if !near {
+                continue;
+            }
             let Some(r) = region(x, y, g, rate, prep.as_ref(), areas)? else {
                 continue;
             };

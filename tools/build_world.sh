@@ -20,7 +20,9 @@
 #   MAX_PBF_MB        skip extracts above this; the default is a third of the
 #                     machine's memory.  The peak is about 2.7 times the size of
 #                     a big extract (Germany: 4.9 GB -> 13.3 GB), more for small
-#                     ones, where fixed costs dominate.
+#                     ones, where fixed costs dominate.  A country with a large
+#                     area adds its elevation grid to the streets and the
+#                     terrain (China: 9.9 GB).
 #
 # The region list is generated: `teasi regions > tools/regions.tsv` fetches
 # Geofabrik's index and maps it onto the firmware's country codes (see

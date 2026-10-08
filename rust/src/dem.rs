@@ -13,7 +13,7 @@
 //! latitude (1200 columns below 50 N, 800 up to 60 N, 600 above), which is what
 //! the decimation to 1200 columns is for.
 //!
-//! Output is the grid of `heights.rs`, written out as the flat file both
+//! Output is the tiled grid of `heights.rs`, written out as the file both
 //! compilers read back.
 
 use std::io::Read;
@@ -23,7 +23,7 @@ use std::time::Duration;
 use anyhow::{bail, ensure, Context, Result};
 use rayon::prelude::*;
 
-use crate::heights::Heights;
+use crate::heights::{Heights, NONE};
 use crate::poly::Ring;
 
 /// Grid points per degree (3").
@@ -322,8 +322,169 @@ pub fn gaussian(z: &[f32], rows: usize, cols: usize, sigma: f64) -> Vec<f32> {
 // building the grid
 // --------------------------------------------------------------------------
 
+/// `gaussian` over a tiled grid, in place, one row of tiles at a time: the
+/// same sums in the same order, so the same floats, without a second copy of
+/// the grid.  Tiles that are not stored count as 0, as they would in the full
+/// grid, and stay 0 -- whoever wants the filter to spill into a tile has to
+/// store it.  The grid's own edges reflect like scipy's.
+pub fn smooth(h: &mut Heights, sigma: f64) {
+    let (lw, w) = kernel(sigma);
+    let t = h.tile;
+    assert!(lw <= t, "kernel wider than a tile");
+    let (trows, tcols) = (h.rows / t, h.cols / t);
+    let (rows, cols) = (h.rows as i64, h.cols as i64);
+    let p = t + 2 * lw;
+    // the bottom lw rows of each tile of the row above, as they were before
+    let mut above: Vec<Option<Vec<f32>>> = vec![None; tcols];
+    for tr in 0..trows {
+        let row: Vec<(usize, usize)> = (0..tcols)
+            .filter_map(|tc| match h.slots[tr * tcols + tc] {
+                NONE => None,
+                s => Some((tc, s as usize)),
+            })
+            .collect();
+        let out: Vec<(usize, Vec<f32>)> = {
+            let g = &*h;
+            let above = &above;
+            let orig = |r: usize, c: usize| -> f32 {
+                if tr > 0 && r / t == tr - 1 {
+                    match &above[c / t] {
+                        Some(a) => a[(r % t + lw - t) * t + c % t],
+                        None => 0.0,
+                    }
+                } else {
+                    g.get(r, c)
+                }
+            };
+            row.par_iter()
+                .map(|&(tc, s)| {
+                    let (r0, c0) = ((tr * t) as i64, (tc * t) as i64);
+                    let gc: Vec<usize> =
+                        (0..p).map(|j| reflect(c0 + j as i64 - lw as i64, cols)).collect();
+                    let mut src = vec![0f32; p * p];
+                    for (i, line) in src.chunks_mut(p).enumerate() {
+                        let r = reflect(r0 + i as i64 - lw as i64, rows);
+                        for (v, &c) in line.iter_mut().zip(&gc) {
+                            *v = orig(r, c);
+                        }
+                    }
+                    // axis 0 over the padded columns, then axis 1
+                    let mut a = vec![0f32; t * p];
+                    for (i, out) in a.chunks_mut(p).enumerate() {
+                        for (j, o) in out.iter_mut().enumerate() {
+                            let mut s = 0f64;
+                            for (k, &wk) in w.iter().enumerate().rev() {
+                                s += wk * src[(i + k) * p + j] as f64;
+                            }
+                            *o = s as f32;
+                        }
+                    }
+                    let mut b = vec![0f32; t * t];
+                    for (out, a) in b.chunks_mut(t).zip(a.chunks(p)) {
+                        for (j, o) in out.iter_mut().enumerate() {
+                            let mut s = 0f64;
+                            for (k, &wk) in w.iter().enumerate().rev() {
+                                s += wk * a[j + k] as f64;
+                            }
+                            *o = s as f32;
+                        }
+                    }
+                    (s, b)
+                })
+                .collect()
+        };
+        for (tc, a) in above.iter_mut().enumerate() {
+            *a = match h.slots[tr * tcols + tc] {
+                NONE => None,
+                s => {
+                    let o = s as usize * t * t;
+                    Some(h.data[o + (t - lw) * t..o + t * t].to_vec())
+                }
+            };
+        }
+        for (s, b) in out {
+            h.data[s * t * t..(s + 1) * t * t].copy_from_slice(&b);
+        }
+    }
+}
+
+// --------------------------------------------------------------------------
+// building the grid
+// --------------------------------------------------------------------------
+
+/// The 1x1 degree tiles of the box `lat0..lat1`, `lon0..lon0 + tcols` (row 0
+/// the northernmost) that the rings touch, plus two tiles all around -- more
+/// than the 1.4 degrees of a terrain region, so every region that touches the
+/// area has its heights.  An edge
+/// marks the tiles it runs through, a scanline through the middle of each row
+/// of tiles the ones inside.
+fn touched(rings: &[Ring], lat0: i64, lat1: i64, lon0: i64, tcols: usize) -> Vec<bool> {
+    let trows = (lat1 - lat0) as usize;
+    let deg = |&(x, y): &(f64, f64)| (x / 2f64.powi(28) * 360.0 - 180.0, 90.0 - y / 2f64.powi(28) * 360.0);
+    let mut hit = vec![false; trows * tcols];
+    let mut mark = |lon: f64, lat: f64| {
+        let r = (lat1 as f64 - lat).floor().clamp(0.0, trows as f64 - 1.0) as usize;
+        let c = (lon - lon0 as f64).floor().clamp(0.0, tcols as f64 - 1.0) as usize;
+        hit[r * tcols + c] = true;
+    };
+    let mut edges: Vec<((f64, f64), (f64, f64))> = Vec::new();
+    for ring in rings {
+        let pts: Vec<(f64, f64)> = ring.pts.iter().map(deg).collect();
+        for (i, &a) in pts.iter().enumerate() {
+            let b = pts[(i + 1) % pts.len()];
+            let n = ((a.0 - b.0).abs().max((a.1 - b.1).abs()) / 0.1).ceil() as usize + 1;
+            for k in 0..=n {
+                let f = k as f64 / n as f64;
+                mark(a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+            }
+            edges.push((a, b));
+        }
+    }
+    for r in 0..trows {
+        let lat = lat1 as f64 - r as f64 - 0.5;
+        let mut xs: Vec<f64> = edges
+            .iter()
+            .filter(|(a, b)| (a.1 > lat) != (b.1 > lat))
+            .map(|(a, b)| a.0 + (lat - a.1) / (b.1 - a.1) * (b.0 - a.0))
+            .collect();
+        xs.sort_by(f64::total_cmp);
+        for pair in xs.chunks_exact(2) {
+            for c in 0..tcols {
+                let lon = lon0 as f64 + c as f64 + 0.5;
+                if lon >= pair[0] && lon <= pair[1] {
+                    mark(lon, lat);
+                }
+            }
+        }
+    }
+    dilate(&dilate(&hit, trows, tcols), trows, tcols)
+}
+
+/// Each tile and its eight neighbours.
+fn dilate(m: &[bool], trows: usize, tcols: usize) -> Vec<bool> {
+    (0..trows * tcols)
+        .map(|i| {
+            let (r, c) = ((i / tcols) as i64, (i % tcols) as i64);
+            (r - 1..=r + 1).any(|r| {
+                (c - 1..=c + 1).any(|c| {
+                    r >= 0
+                        && c >= 0
+                        && (r as usize) < trows
+                        && (c as usize) < tcols
+                        && m[r as usize * tcols + c as usize]
+                })
+            })
+        })
+        .collect()
+}
+
 /// Download the tiles covering `rings` and build the smoothed grid.  `sigma`
 /// of 0 leaves the DEM unsmoothed.
+///
+/// The grid spans the rings' bounding box in whole degrees, but only the
+/// tiles within two degrees of the rings are fetched, and of those only the ones
+/// the bucket has (land) are stored -- with smoothing also their neighbours,
+/// which the filter spills a few points into.
 pub fn build(rings: &[Ring], tdir: &Path, sigma: f64, log: &dyn Fn(&str)) -> Result<Heights> {
     ensure!(!rings.is_empty(), "the boundary polygon is empty");
     let (mut west, mut east) = (f64::MAX, f64::MIN);
@@ -339,42 +500,75 @@ pub fn build(rings: &[Ring], tdir: &Path, sigma: f64, log: &dyn Fn(&str)) -> Res
     }
     let (lon0, lon1) = (west.floor() as i64, east.ceil() as i64);
     let (lat0, lat1) = (south.floor() as i64, north.ceil() as i64);
-    let (rows, cols) = (((lat1 - lat0) as usize) * N, ((lon1 - lon0) as usize) * N);
+    let (trows, tcols) = ((lat1 - lat0) as usize, (lon1 - lon0) as usize);
+    let want = touched(rings, lat0, lat1, lon0, tcols);
     log(&format!(
-        "{} to {} N, {} to {} E: {} tiles, grid {}x{}",
+        "{} to {} N, {} to {} E: {} tiles near the area of {} in the box, grid {}x{}",
         lat0,
         lat1,
         lon0,
         lon1,
-        (lat1 - lat0) * (lon1 - lon0),
-        rows,
-        cols
+        want.iter().filter(|&&w| w).count(),
+        trows * tcols,
+        trows * N,
+        tcols * N
     ));
     std::fs::create_dir_all(tdir).with_context(|| format!("create {:?}", tdir))?;
 
-    let mut z = vec![0f32; rows * cols];
+    let mut found: Vec<Option<PathBuf>> = vec![None; trows * tcols];
     let mut n = 0;
     for la in lat0..lat1 {
+        let r = (lat1 - la - 1) as usize;
+        if !(0..tcols).any(|c| want[r * tcols + c]) {
+            continue;
+        }
         for lo in lon0..lon1 {
-            let Some(path) = fetch(la, lo, tdir)? else { continue };
-            let (th, tw, a) = read_tiff(&path)?;
-            let r = ((lat1 - la - 1) as usize) * N;
-            let c = ((lo - lon0) as usize) * N;
-            for i in 0..N {
-                let si = (i * th) / N;
-                for j in 0..N {
-                    let v = a[si * tw + (j * tw) / N];
-                    // numpy.maximum(a, 0), which keeps a NaN
-                    z[(r + i) * cols + c + j] = if v.is_nan() || v > 0.0 { v } else { 0.0 };
-                }
+            let i = r * tcols + (lo - lon0) as usize;
+            if want[i] {
+                found[i] = fetch(la, lo, tdir)?;
+                n += usize::from(found[i].is_some());
             }
-            n += 1;
         }
         log(&format!("  {} N: {} tiles", la, n));
     }
     ensure!(n > 0, "not one tile of the area exists in the bucket");
-    if sigma > 0.0 {
-        z = gaussian(&z, rows, cols, sigma);
+
+    let land: Vec<bool> = found.iter().map(Option::is_some).collect();
+    let keep = if sigma > 0.0 { dilate(&land, trows, tcols) } else { land };
+    let mut slots = vec![NONE; trows * tcols];
+    let mut paths: Vec<Option<&PathBuf>> = Vec::new();
+    for i in 0..trows * tcols {
+        if keep[i] {
+            slots[i] = paths.len() as u32;
+            paths.push(found[i].as_ref());
+        }
     }
-    Ok(Heights { rows, cols, lon0: lon0 as f64, lat0: lat1 as f64, step: 1.0 / N as f64, z })
+    let mut data = vec![0f32; paths.len() * N * N];
+    data.par_chunks_mut(N * N).zip(&paths).try_for_each(|(out, p)| -> Result<()> {
+        let Some(path) = p else { return Ok(()) };
+        let (th, tw, a) = read_tiff(path)?;
+        for (i, line) in out.chunks_mut(N).enumerate() {
+            let si = (i * th) / N;
+            for (j, o) in line.iter_mut().enumerate() {
+                let v = a[si * tw + (j * tw) / N];
+                // numpy.maximum(a, 0), which keeps a NaN
+                *o = if v.is_nan() || v > 0.0 { v } else { 0.0 };
+            }
+        }
+        Ok(())
+    })?;
+    let mut h = Heights {
+        rows: trows * N,
+        cols: tcols * N,
+        lon0: lon0 as f64,
+        lat0: lat1 as f64,
+        step: 1.0 / N as f64,
+        tile: N,
+        slots,
+        data,
+    };
+    if sigma > 0.0 {
+        smooth(&mut h, sigma);
+    }
+    Ok(h)
 }

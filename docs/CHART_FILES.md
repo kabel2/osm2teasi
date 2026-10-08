@@ -468,7 +468,7 @@ otherwise add up to spurious ascents along the roads. `teasi osm --heights=` and
 `teasi terrain` read the result.
 
 ```bash
-teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin   # 234 tiles, 3.6 s cached
+teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin   # 207 tiles, 1.7 s cached
 ```
 
 ### 5.6 Compilers: layers from current OSM data
@@ -524,12 +524,12 @@ details are in the layer documents.
 
 | Step | Command | Time | RAM |
 |---|---|---:|---:|
-| DEM grid | `teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin` | 3.6 s | 3.3 GB |
+| DEM grid | `teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin` | 1.7 s | 1.1 GB |
 | POIs | `teasi osmpoi … --country=17` / `teasi osmpoint …` | 35 + 17 s | 0.9 GB |
 | Areas | `teasi osmarea … - --country=17 --land=…` | 3:13 | 6.3 GB |
 | Streets | `teasi osm --heights=… --country=17 "--name=United Kingdom" … -` | 2:45 | 6.4 GB |
 | Addresses | `teasi ta --country=17 "--name=United Kingdom" …` | 2:24 | 4.7 GB |
-| Terrain | `teasi terrain --country=17 --land=… --area=… …` | 1:24 | 7.9 GB |
+| Terrain | `teasi terrain --country=17 --land=… --area=… …` | 1:20 | 5.7 GB |
 
 The times and peaks for areas, streets and addresses are those of 2026-10-08; until then
 the streets needed 16.0 GB and the addresses 13.7 GB (see "Memory" below). Germany, from
@@ -547,6 +547,12 @@ of running sums per node, and the binary uses mimalloc, which hands freed memory
 where glibc keeps it in its per-thread arenas. Two files changed by a few bytes (ta −4 of
 114 MB, osm +72 of 531 MB): the smaller dictionaries compress some records slightly
 differently; the decompressed records are identical.
+
+The elevation grid is the one piece that grows with a country's *area* rather than its
+data: it covers the bounding box, and as one block of floats China's would be 14 GB, the
+Russian Far East's — whose box crosses the antimeridian and so spans the whole earth —
+95 GB. It is stored by 1° tile instead, only near the area and only where there is land,
+and smoothed in place (`dem.rs`, `heights.rs`): China needs 9.9 GB.
 
 The result: osm 531 MB (12.1 M graph nodes, 30 M edges, 57 % with an ascent, 33 % of the
 nodes with left turns), osmarea 83 MB, osmpoi 17 MB (750,000 POIs), osmpoint 0.5 MB (12,561

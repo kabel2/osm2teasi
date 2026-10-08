@@ -1050,6 +1050,71 @@ fn gaussian_filter_matches_scipy() {
 }
 
 #[test]
+fn tiled_smoothing_matches_the_full_grid() {
+    // 4x5 tiles of 12x12, some not stored (0, like open sea): every stored
+    // tile must come out as the same floats `gaussian` gives the full grid,
+    // and the file must read back unchanged.
+    use teasi::heights::{Heights, NONE};
+    let (t, trows, tcols) = (12usize, 4usize, 5usize);
+    let (rows, cols) = (t * trows, t * tcols);
+    let stored = |tr: usize, tc: usize| (tr * 7 + tc * 3) % 4 != 0;
+    let mut r = Lcg(777);
+    let mut full = vec![0f32; rows * cols];
+    let mut slots = vec![NONE; trows * tcols];
+    let mut data = Vec::new();
+    for tr in 0..trows {
+        for tc in 0..tcols {
+            if !stored(tr, tc) {
+                continue;
+            }
+            slots[tr * tcols + tc] = (data.len() / (t * t)) as u32;
+            for i in 0..t {
+                for j in 0..t {
+                    let v = (r.next() * 900.0 - 100.0).max(0.0) as f32;
+                    full[(tr * t + i) * cols + tc * t + j] = v;
+                    data.push(v);
+                }
+            }
+        }
+    }
+    for sigma in [1.0, 2.5] {
+        let want = teasi::dem::gaussian(&full, rows, cols, sigma);
+        let mut h = Heights {
+            rows,
+            cols,
+            lon0: 5.0,
+            lat0: 50.0,
+            step: 1.0 / t as f64,
+            tile: t,
+            slots: slots.clone(),
+            data: data.clone(),
+        };
+        teasi::dem::smooth(&mut h, sigma);
+        for tr in 0..trows {
+            for tc in 0..tcols {
+                for i in 0..t {
+                    for j in 0..t {
+                        let (rr, cc) = (tr * t + i, tc * t + j);
+                        let w = if stored(tr, tc) { want[rr * cols + cc] } else { 0.0 };
+                        assert_eq!(h.get(rr, cc).to_bits(), w.to_bits(), "sigma {} at {},{}", sigma, rr, cc);
+                    }
+                }
+            }
+        }
+        let path = std::env::temp_dir().join(format!("teasi-heights-{}.bin", std::process::id()));
+        h.write(path.to_str().unwrap()).unwrap();
+        let back = Heights::load(path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!((back.rows, back.cols, back.tile), (rows, cols, t));
+        assert_eq!((back.lon0, back.lat0, back.step), (h.lon0, h.lat0, h.step));
+        assert_eq!(back.slots, h.slots);
+        assert!(back.data.iter().zip(&h.data).all(|(a, b)| a.to_bits() == b.to_bits()));
+        assert!(back.covers(5.0 + 13.0 / 12.0, 50.0 - 1.0, 5.0 + 14.0 / 12.0, 50.0 - 0.9));
+        assert!(!back.covers(0.0, 40.0, 1.0, 41.0));
+    }
+}
+
+#[test]
 fn dem_tiff_matches_tifffile() {
     let raw: Vec<u8> = (0..DEM_TIFF.len() / 2)
         .map(|i| u8::from_str_radix(&DEM_TIFF[2 * i..2 * i + 2], 16).unwrap())

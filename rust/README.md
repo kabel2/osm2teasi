@@ -323,11 +323,22 @@ from the public AWS bucket, decimates them onto one grid of 3″ (1200 points pe
 smooths it with a Gaussian of σ = 1 grid point, because the DEM is a *surface* model and
 trees and houses would otherwise add up to spurious ascents along the roads.
 
+The grid spans the area's bounding box but is stored by tile (`heights.rs`): only the tiles
+within two degrees of the polygon are fetched, and only those the bucket has — land — are
+kept, with their neighbours, which the filter spills a few points into. Everything else is 0.
+The filter runs one row of tiles at a time, in place, with the same sums in the same order,
+so the result is the same floats as one pass over the full grid. A bounding box is mostly
+sea, and where a polygon crosses the antimeridian (the Russian Far East, Alaska, New
+Zealand, Fiji) it is the whole width of the earth: as one block the Far East would be 95 GB,
+China 14 GB plus two copies for the filter.
+
 ```bash
 ./target/release/teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin
 ```
 
-Great Britain is 234 tiles and a 15,600 × 21,600 grid: 3.6 s and 3.3 GB from cached tiles.
+Great Britain is 207 of the 234 tiles in its box and a 15,600 × 21,600 grid: 1.7 s and 1.1 GB
+from cached tiles. China is 1605 of 2480, a 48,000 × 74,400 grid, in 9.9 GB (43 GB as one
+block, filter included).
 Two pieces of this have to be exact, and both are pinned against the libraries that define
 them (`tests/compat.rs`):
 
@@ -448,7 +459,7 @@ cover from `area.rs` and the sea from `land.rs`.
 ./target/release/teasi terrain --country=17 \
     --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
     --area=osm_ref/great-britain-latest.osm.pbf \
-    build/gb/dem.bin osm_ref/great-britain.poly out 20260919    # 1:24, 7.9 GB
+    build/gb/dem.bin osm_ref/great-britain.poly out 20260919    # 1:20, 5.7 GB
 ```
 
 ### The pieces of Pillow
@@ -497,8 +508,13 @@ that are lossy anyway and that the file keeps no checksum over, that is accepted
 
 | | Regions | Elevation tiles | Map images | PBF and shapefile → chart file |
 |---|---|---|---|---:|
-| Denmark | 28 | 1034 | 2029 | 17 s, 1.7 GB — 7 s of that the regions |
-| Great Britain | 85 | 1999 | 5391 | 1:24, 7.9 GB |
+| Denmark | 19 | 595 | 1329 | 17 s, 1.7 GB — 5 s of that the regions |
+| Great Britain | 73 | 1552 | 4772 | 1:20, 5.7 GB |
+
+Only the regions that touch the area are built. Until 2026-10-08 it was every region of the
+bounding box with land in it — Denmark had 28, nine of them all Norway, Sweden or the German
+coast. The original Denmark_terrain has 19 on the mainland (plus four of the Faroes), and
+18 of them are the same as ours.
 
 Those times include reading the 2.2 GB PBF and the 1.3 GB shapefile; the drawing itself is
 spread across every core. `teasi check` cannot look into this layer — it has no slot areas —
