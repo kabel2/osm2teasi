@@ -1,6 +1,6 @@
 """Write Teasi chart files (*.vYYYYMMDD) -- the inverse of chart.py.
 
-Header fields as read by the chart loader FUN_003f282c (KARTEN_ENTSCHLUESSELUNG.md 1):
+Header fields as read by the chart loader FUN_003f282c (CHART_FILES.md 1):
   0x44 date (8 ASCII; a file is skipped if one with the same layer/country and an
   equal or newer date is already loaded), 0x4C type, 0x50 layer bit mask, 0x54 country,
   0x58..0x6C buffer sizes (maxed over all loaded files): 0x58 largest compressed

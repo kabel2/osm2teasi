@@ -1,14 +1,14 @@
-# Dachboden
+# Attic
 
-Einmal-Skripte aus der Analysephase. Sie haben ihren Zweck erfüllt und sind hier nur
-dokumentiert, nicht gepflegt: hartkodierte Pfade, teils Zwischendateien, die es nicht mehr
-gibt. Für den normalen Weg (Karte lesen, Layer bauen) braucht man sie nicht — der steht
-in [../README.md](../README.md).
+One-off scripts from the analysis phase. They served their purpose and are only kept here
+for the record, not maintained: hard-coded paths, and in part intermediate files that no
+longer exist. The normal route (read a map, build a layer) does not need them — that one
+is in [../README.md](../README.md).
 
-| Datei | Was es war |
+| File | What it was |
 |---|---|
-| `chart_audit.py` | Prüft die äußere Hülle einer Chart-Datei (Header, Tile-Verzeichnis, Record-Kette), noch ohne Interpretation der verschlüsselten Nutzdaten. Das war der Einstieg. |
-| `ks_attack.py` | Known-Plaintext-Angriff auf die Payloads unter der falschen Annahme eines eigenen XOR-Keystreams. Widerlegt — es ist PC1 plus LZMA. |
-| `seed_hunt.py` | Suche nach dem globalen Schlüssel durch echte ARM-Emulation (Unicorn) der Firmware-Routinen `FUN_00289660`/`FUN_002896c8`. Diente später als Gegenprobe für `tools/pc1.py`. |
-| `terrain_render/` | Rekonstruktion der Kachelanordnung im terrain-Layer (Block 1 plus Mipmap-Pyramide) durch Rendern und Vergleichen. Ergebnis steht in `docs/TERRAIN_FORMAT.md`. |
-| `ghidra/` | 23 Einmal-Suchen in Ghidra (`*Hunt.java`, `Decomp*.java`, …), aus denen die vier gepflegten Skripte in `../ghidra_scripts/` entstanden sind. |
+| `chart_audit.py` | Checks the outer shell of a chart file (header, tile directory, record chain), still without interpreting the encrypted payload. This was the way in. |
+| `ks_attack.py` | A known-plaintext attack on the payloads, under the mistaken assumption of a proprietary XOR keystream. Disproved — it is PC1 plus LZMA. |
+| `seed_hunt.py` | Hunt for the global key by actually emulating the firmware routines `FUN_00289660`/`FUN_002896c8` on ARM (Unicorn). Later served as a cross-check for `tools/pc1.py`. |
+| `terrain_render/` | Reconstruction of the tile arrangement in the terrain layer (block 1 plus the mipmap pyramid) by rendering and comparing. The result is in `docs/TERRAIN_FORMAT.md`. |
+| `ghidra/` | 23 one-off searches in Ghidra (`*Hunt.java`, `Decomp*.java`, …), out of which the four maintained scripts in `../ghidra_scripts/` grew. |

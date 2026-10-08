@@ -1,163 +1,164 @@
-# osmarea-Format (`Denmark_osmarea.v20210810`)
+# osmarea format (`Denmark_osmarea.v20210810`)
 
-Stand: 2026-09-18. **Container und Semantik verstanden, Compiler fertig** (Abschnitt „Aus OSM
-erzeugen“, Laufzeit ~4 min). **Container vollständig verstanden**: `parse_c`/`build_c` in
-`tools/layers.py` bauen alle 368 Records bytegleich nach. Die Flächenklassen sind per Abgleich
-mit OSM zugeordnet (`denmark-220101.osm.pbf`).
+As of 2026-09-18. **Container and semantics understood, compiler finished** (section
+"Building it from OSM", runtime ~4 min). **Container fully understood**: `parse_c`/`build_c`
+in `tools/layers.py` rebuild all 368 records byte-identically. The area classes were
+assigned by matching against OSM (`denmark-220101.osm.pbf`).
 
-Inhalt: **Flächen** (Landnutzung, Wald, Wasser, Siedlungen …) als Polygone, dazu Flächen-
-umrisse und die Füllung für offenes Wasser (`#OW`). Dänemark: 21.588 + 6524 + 3339 Objekte in
-368 Records.
+Content: **areas** (land use, forest, water, built-up land …) as polygons, plus area
+outlines and the fill for open water (`#OW`). Denmark: 21,588 + 6524 + 3339 objects in
+368 records.
 
-Hülle, Verschlüsselung, Slot-Bereiche und Koordinatensystem: siehe
-[KARTEN_ENTSCHLUESSELUNG.md](KARTEN_ENTSCHLUESSELUNG.md), Abschnitte 1, 1a und 3.
-Das Geometrieformat steht in [OSM_FORMAT.md](OSM_FORMAT.md) („Geometrie“).
+Shell, encryption, slot areas and the coordinate system: see
+[CHART_FILES.md](CHART_FILES.md), sections 1, 1a and 3. The geometry format is in
+[OSM_FORMAT.md](OSM_FORMAT.md) ("Geometry").
 
-## Einordnung
+## Where it sits
 
 | | |
 |---|---|
-| Header `0x50` | `4` (Layer-Kennung) |
-| Slot-Bereich | **C** (Tile-Kopf `+0x140`, 4×4 Unterzellen) |
-| Leser in der Firmware | `FUN_003e651c` (interner Typ 2) |
-| 1 Record | = alle Flächen **einer 4×4-Unterzelle** (0,3515625°), Koordinaten-Einheit 360°/2²⁵ |
-| Koordinaten | **ohne** Rand (anders als osm/ta), die Punkte sind exakt OSM-Knoten (gerundet auf 360°/2²⁵) |
-| Besonderheit | Das erste Verzeichnis-Tile ist ein Platzhalter `(0,0)` mit Größe 0 |
+| Header `0x50` | `4` (layer id) |
+| Slot area | **C** (tile head `+0x140`, 4×4 sub-cells) |
+| Reader in the firmware | `FUN_003e651c` (internal type 2) |
+| 1 record | = every area of **one 4×4 sub-cell** (0.3515625°), coordinate unit 360°/2²⁵ |
+| Coordinates | **without** a margin (unlike osm/ta); the points are exactly OSM nodes, rounded to 360°/2²⁵ |
+| Oddity | The first directory tile is a placeholder `(0,0)` of size 0 |
 
-## C-Record (allgemeiner Aufbau)
+## C record (general layout)
 
-Denselben Container nutzen auch die C-Records von osm (siehe [OSM_FORMAT.md](OSM_FORMAT.md)).
+The C records of osm use the same container (see [OSM_FORMAT.md](OSM_FORMAT.md)).
 
 ```
-0x00  15 × u32  Kopf
-        [0]  Größe eines Arrays (überschrieben mit cell_x, s. u.)
-        [1]  cell_y (überschrieben)          [2]  0
-        [3]  n c1 (0x10 B)   [4]  0 (Zeiger)
+0x00  15 × u32  head
+        [0]  size of an array (overwritten with cell_x, see below)
+        [1]  cell_y (overwritten)            [2]  0
+        [3]  n c1 (0x10 B)   [4]  0 (pointer)
         [5]  n c2 (0x08 B)   [6]  0
         [7]  n c3 (0x18 B)   [8]  0
         [9]  n c4 (0x0C B)   [10] 0
         [11] n c5 (0x1C B)   [12] 0
         [13] n c6 (0x18 B)   [14] 0
-0x3C  c1 … c6 hintereinander, jedes Array BYTEWEISE TRANSPONIERT
-      danach die variablen Teile, Array für Array, darin Element für Element:
-        c1: [2] = Anzahl u32
-        c2: [0] = Anzahl u32
-        c3: [1] = Anzahl u16 (String), dann [4] = Anzahl u32
-        c4: [1] = Anzahl u32
-        c5: [1] = Anzahl u16 (String), dann [5] = Anzahl u32
-        c6: [1] = Anzahl u16 (String), dann [4] = Anzahl u32
+0x3C  c1 … c6 one after another, every array TRANSPOSED BYTEWISE
+      then the variable parts, array by array, element by element within each:
+        c1: [2] = number of u32
+        c2: [0] = number of u32
+        c3: [1] = number of u16 (string), then [4] = number of u32
+        c4: [1] = number of u32
+        c5: [1] = number of u16 (string), then [5] = number of u32
+        c6: [1] = number of u16 (string), then [4] = number of u32
 ```
 
-Die Zeigerfelder (je das Feld hinter der Anzahl bzw. `[0]` vor der String-Länge) sind in der
-Datei 0. Es gibt kein Padding.
+The pointer fields (each the field behind the count, or `[0]` before the string length) are
+0 in the file. There is no padding.
 
-## osmarea: Arrays c3, c5, c6
+## osmarea: arrays c3, c5, c6
 
-In osmarea sind c1, c2 und c4 leer. Belegungsmuster: nur c6 (249 Records), c3 + c5 + c6 (106),
+In osmarea c1, c2 and c4 are empty. Occupancy: c6 only (249 records), c3 + c5 + c6 (106),
 c5 + c6 (13).
 
-### c5: Fläche mit Klasse (0x1C B = 7 × u32), 21.588 Stück
+### c5: area with a class (0x1C B = 7 × u32), 21,588 of them
 
-| Feld | Inhalt |
+| Field | Content |
 |---|---|
-| `[0]`/`[1]` | Name (Zeiger/Länge), in DK immer leer |
-| `[2]` | **Flächenklasse** 0–17 |
-| `[3]` | Bounding-Box Minimum, gepackt `(v << 16) \| u` |
-| `[4]` | Bounding-Box Maximum |
-| `[5]` | Anzahl u32 der Geometrie |
-| `[6]` | 0 (Zeiger) |
+| `[0]`/`[1]` | name (pointer/length), always empty in DK |
+| `[2]` | **area class** 0–17 |
+| `[3]` | bounding box minimum, packed as `(v << 16) \| u` |
+| `[4]` | bounding box maximum |
+| `[5]` | number of u32 of geometry |
+| `[6]` | 0 (pointer) |
 
-Zuordnung per Abgleich (OSM-Way mit den meisten gemeinsamen Punkten; Multipolygone aus
-ungetaggten Ways fallen unter „nicht zugeordnet“):
+Assigned by matching (the OSM way with the most points in common; multipolygons made of
+untagged ways end up under "unassigned"):
 
-| Klasse | Anzahl | OSM (Anteil) |
+| Class | Count | OSM (share) |
 |---:|---:|---|
-| 0 | 362 | Sonstiges: `landuse=plant_nursery` 30 %, `brownfield` 27 %, `animal_keeping` … |
+| 0 | 362 | miscellaneous: `landuse=plant_nursery` 30 %, `brownfield` 27 %, `animal_keeping` … |
 | 1 | 412 | `landuse=commercial` 60 %, `retail` 32 % |
-| 2 | 411 | `landuse=military` (39 %, Rest nicht zugeordnet) |
+| 2 | 411 | `landuse=military` (39 %, the rest unassigned) |
 | 3 | 1289 | `landuse=cemetery` 93 % |
 | 4 | 1751 | `landuse=industrial` 65 %, `quarry` 13 %, `construction` 8 % |
-| 5 | 2724 | Freizeit: `leisure=park/pitch/playground/golf_course`, `landuse=recreation_ground` |
-| 6 | 3836 | `landuse=forest` 73 % (auch `natural=wood`, `heath`) |
+| 5 | 2724 | leisure: `leisure=park/pitch/playground/golf_course`, `landuse=recreation_ground` |
+| 6 | 3836 | `landuse=forest` 73 % (also `natural=wood`, `heath`) |
 | 7 | 3646 | `landuse=meadow` 61 %, `grass` 19 % |
 | 8 | 3689 | `landuse=farmland` 51 %, `farmyard` 30 % |
 | 9 | 726 | `natural=beach` 63 % |
 | 10 | 1953 | `natural=wetland` 78 % |
-| 11 | 520 | `man_made=pier` als Fläche und kleine Inseln (`place=islet` an geschlossener Küstenlinie), über das Meer gezeichnet |
-| 16 | 35 | `man_made=groyne` (Buhne) 80 % |
-| 17 | 234 | `man_made=breakwater` (Wellenbrecher) 67 % |
+| 11 | 520 | `man_made=pier` as an area, and small islands (`place=islet` on a closed coastline), drawn over the sea |
+| 16 | 35 | `man_made=groyne` 80 % |
+| 17 | 234 | `man_made=breakwater` 67 % |
 
-### c6: Fläche ohne Klasse (0x18 B = 6 × u32), 6524 Stück
+### c6: area without a class (0x18 B = 6 × u32), 6524 of them
 
-| Feld | Inhalt |
+| Field | Content |
 |---|---|
-| `[0]`/`[1]` | Name, meist leer. `#OW` (319×, eines pro Zelle) = **Meer**: Zelle minus Land, Inseln als Löcher; bei reinen Meereszellen ein Quadrat über die ganze Zelle (Bounding-Box 0 … `0x80008000`) |
-| `[2]`, `[3]` | Bounding-Box Min/Max |
-| `[4]` | Anzahl u32 der Geometrie |
-| `[5]` | 0 (Zeiger) |
+| `[0]`/`[1]` | name, mostly empty. `#OW` (319 times, one per cell) = **sea**: the cell minus the land, islands as holes; for pure sea cells a square over the whole cell (bounding box 0 … `0x80008000`) |
+| `[2]`, `[3]` | bounding box min/max |
+| `[4]` | number of u32 of geometry |
+| `[5]` | 0 (pointer) |
 
-Laut Abgleich **Wasserflächen** (`natural=water` 54 %, der Rest sind überwiegend
-Multipolygone ohne eigene Tags am Way), dazu `#OW` für offenes Meer.
+By the match these are **water areas** (`natural=water` 54 %, the rest mostly multipolygons
+with no tags of their own on the way), plus `#OW` for the open sea.
 
-### c3: Umriss (0x18 B = 6 × u32), 3339 Stück
+### c3: outline (0x18 B = 6 × u32), 3339 of them
 
-Gleiches Feldlayout wie c6, Name immer leer. Laut Abgleich zu 92 % **`landuse=residential`**,
-also Siedlungsflächen (nicht Umrisse, wie früher vermutet).
+Same field layout as c6, name always empty. By the match 92 % **`landuse=residential`**, so
+built-up areas (not outlines, as assumed earlier).
 
-### Objekte, Blöcke und Geometrie
+### Objects, blocks and geometry
 
-**Ein Objekt = alle Flächen einer Klasse in einem 4096er-Block.** Jede Zelle ist in 8×8 Blöcke
-zu 4096 Einheiten geteilt. Die Flächen werden an den Blockgrenzen zugeschnitten, und alle
-Ringe einer Klasse in einem Block stehen als Teile in einem Objekt (c5: pro Klasse, c3/c6:
-Siedlung/Wasser). Ausnahme: `#OW` ist ein Objekt pro Zelle und nicht in Blöcke geteilt.
+**One object = every area of one class within one 4096-unit block.** Each cell is divided
+into 8×8 blocks of 4096 units. The areas are clipped at the block borders, and all the
+rings of one class within a block sit as parts in one object (c5: per class, c3/c6:
+built-up/water). Exception: `#OW` is one object per cell and is not divided into blocks.
 
-Geometrie: Folge von Ringen `[u32 (hi << 16) | n][n Punkte]` (siehe OSM_FORMAT.md), jeder Ring
-geschlossen (erster = letzter Punkt). Außenringe haben positive, Löcher negative Fläche
-(Shoelace in (u, v)); die Firmware füllt nach der Gerade-Ungerade-Regel pro Objekt
-(`FUN_003df11c`, Scanline mit Kantenliste).
+Geometry: a sequence of rings `[u32 (hi << 16) | n][n points]` (see OSM_FORMAT.md), each
+ring closed (first = last point). Outer rings have a positive area, holes a negative one
+(shoelace in (u, v)); the firmware fills by the even-odd rule per object (`FUN_003df11c`, a
+scanline with an edge list).
 
-**`hi` = Detailstufe:** Die Zeichenroutine überspringt einen Ring, wenn `hi` größer als die
-aktuelle Detailstufe ist (`*(param_1 + 0x34) < hi`). Kleine Flächen haben also 14, große 9.
-Die Regel (per Abgleich, 96,5 % Treffer): kürzere Seite `m` der Bounding-Box der **ganzen**
-(verschmolzenen) Fläche vor dem Zuschnitt, `hi = 14 − k` für das größte `k ≤ 5` mit
-`m ≥ 33 · 2^k` Einheiten. Zugeschnittene Stücke erben `hi` der ganzen Fläche, Löcher bekommen
-`hi` nach ihrer eigenen Bounding-Box. `#OW`-Ringe haben immer 9.
+**`hi` = level of detail:** the drawing routine skips a ring when `hi` is larger than the
+current level of detail (`*(param_1 + 0x34) < hi`). Small areas therefore have 14, large
+ones 9. The rule (by matching, 96.5 % hit rate): take the shorter side `m` of the bounding
+box of the **whole** (merged) area before clipping, then `hi = 14 − k` for the largest
+`k ≤ 5` with `m ≥ 33 · 2^k` units. Clipped pieces inherit the `hi` of the whole area, holes
+get their `hi` from their own bounding box. `#OW` rings are always 9.
 
-Die Bounding-Box im Struct entspricht bei ~92 % der Objekte den Min/Max-Werten der Punkte, bei
-den übrigen ist sie etwas größer (unkritisch).
+For ~92 % of the objects the bounding box in the struct matches the min/max of the points;
+for the rest it is slightly larger (harmless).
 
-## Nachbauen
+## Rebuilding it
 
 ```python
 import sys; sys.path.insert(0, "tools")
 import layers as L
-for tx, ty, cx, cy, g, raw in L.iter_records(open(PFAD, "rb").read(), "C"):
+for tx, ty, cx, cy, g, raw in L.iter_records(open(PATH, "rb").read(), "C"):
     rec = L.parse_c(raw)
     for f in rec["c5"]:
-        klasse = f["s"][2]
+        cls = f["s"][2]
         for level, pts in L.geometry_parts(f["v"][1]):
             ring = [L.to_latlon(cx, cy, g, p) for p in pts]
     assert L.build_c(rec) == raw
 ```
 
-Kopf `[0]` im Original: bei Records mit nur einem Array dessen Größe (249×), sonst meist die
-Größe von c5 (117×), selten von c6 (2×). Die Firmware überschreibt das Feld, der Wert ist also
-unkritisch.
+Head `[0]` in the original: for records with a single array its size (249 times), otherwise
+mostly the size of c5 (117 times), rarely of c6 (2 times). The firmware overwrites the
+field, so the value does not matter.
 
-## Aus OSM erzeugen
+## Building it from OSM
 
 ```bash
 .venv/bin/python tools/osm_area_extract.py osm_ref/denmark-latest.osm.pbf build/ref/area_latest.pkl   # ~1 min
 .venv/bin/python tools/compile_osmarea.py build/ref/area_latest.pkl osm_ref/denmark.poly \
-    2013021200000368/7/943/20317/Denmark_osmarea.v20210810 build/<ordner>/Denmark_osmarea.v20210810 [JJJJMMTT]  # ~4 min
+    2013021200000368/7/943/20317/Denmark_osmarea.v20210810 build/<dir>/Denmark_osmarea.v20210810 [YYYYMMDD]  # ~4 min
 ```
 
-**Länder ohne Originaldatei** (z. B. Großbritannien): statt des Originals `-`, das Meer kommt
-dann vollständig aus den weltweiten Landpolygonen von osmdata.openstreetmap.de
-(`land-polygons-split-4326`, aus `natural=coastline` der ganzen Welt), zugeschnitten mit
-`tools/land_extract.py` (braucht `pyshp`). Meer = Zelle minus Land in jedem Tile, das die
-Grenze berührt, also auch mit den Küsten der Nachbarländer (z. B. Frankreich bei Dover).
-Details und Laufzeiten: [KARTEN_ENTSCHLUESSELUNG.md](KARTEN_ENTSCHLUESSELUNG.md) 5.7.
+**Countries without an original file** (Great Britain, say): pass `-` instead of the
+original, and the sea then comes entirely from the worldwide land polygons of
+osmdata.openstreetmap.de (`land-polygons-split-4326`, built from the whole world's
+`natural=coastline`), clipped with `tools/land_extract.py` (needs `pyshp`). Sea = the cell
+minus the land in every tile that touches the boundary, so the coasts of the neighbouring
+countries are included too (France at Dover, for instance). Details and runtimes:
+[CHART_FILES.md](CHART_FILES.md) 5.7.
 
 ```bash
 .venv/bin/python tools/land_extract.py osm_ref/land-polygons-split-4326/land_polygons.shp \
@@ -166,7 +167,7 @@ Details und Laufzeiten: [KARTEN_ENTSCHLUESSELUNG.md](KARTEN_ENTSCHLUESSELUNG.md)
     build/gb/area.pkl osm_ref/great-britain.poly - build/gb/GreatBritain_osmarea.v20260918 20260918
 ```
 
-Dasselbe in Rust, ohne Pickle dazwischen (braucht libgeos, siehe
+The same in Rust, with no pickle in between (needs libgeos, see
 [../rust/README.md](../rust/README.md)):
 
 ```bash
@@ -177,55 +178,57 @@ cd rust && ./target/release/teasi osmarea osm_ref/denmark-latest.osm.pbf osm_ref
     --land=osm_ref/land-polygons-split-4326/land_polygons.shp
 ```
 
-`osm_area_extract.py` speichert alle Flächen (geschlossene Ways und Multipolygone, per osmium
-zusammengesetzt) mit Landnutzungs-Tags sowie die Küstenlinien-Ways. `compile_osmarea.py` baut
-daraus den Layer (Abgleich des Originals mit `denmark-220101`, Regeln unten):
+`osm_area_extract.py` stores every area (closed ways and multipolygons, assembled by
+osmium) carrying land-use tags, plus the coastline ways. `compile_osmarea.py` builds the
+layer from them (the original was matched against `denmark-220101`, rules below):
 
-1. **Klasse** nach Tags, `landuse` vor `natural`, `leisure`, `man_made` (`area_class`):
+1. **Class** from the tags, `landuse` before `natural`, `leisure`, `man_made`
+   (`area_class`):
 
-   | Ziel | OSM |
+   | Target | OSM |
    |---|---|
    | c3 | `landuse=residential` |
    | c5 0 | `landuse=plant_nursery, brownfield, animal_keeping, fishfarm, garages, harbour, religious, scout_camp` |
    | c5 1 / 2 / 3 | `landuse=commercial, retail` / `military` / `cemetery` |
    | c5 4 | `landuse=industrial, quarry, construction, railway, landfill` |
-   | c5 5 | `leisure=park, pitch, playground, garden, sports_centre, golf_course, track, marina …`, `landuse=recreation_ground` (**ohne** `nature_reserve`: große Schutzgebiete fehlen im Original) |
-   | c5 6 | `landuse=forest, scrub`, `natural=heath` (**nicht** `natural=wood/scrub/grassland`) |
+   | c5 5 | `leisure=park, pitch, playground, garden, sports_centre, golf_course, track, marina …`, `landuse=recreation_ground` (**without** `nature_reserve`: large protected areas are missing from the original) |
+   | c5 6 | `landuse=forest, scrub`, `natural=heath` (**not** `natural=wood/scrub/grassland`) |
    | c5 7 | `landuse=meadow, grass, greenfield, village_green, greenhouse_horticulture` |
    | c5 8 | `landuse=farmland, farmyard, allotments, orchard, vineyard` |
    | c5 9 / 10 | `natural=beach` / `natural=wetland` |
-   | c5 11 / 16 / 17 | `man_made=pier` und Inseln (`place=islet`) / `groyne` / `breakwater` |
-   | c6 | `natural=water` (außer `water=river`), `landuse=basin, reservoir, aquaculture`, `waterway=dock` |
+   | c5 11 / 16 / 17 | `man_made=pier` and islands (`place=islet`) / `groyne` / `breakwater` |
+   | c6 | `natural=water` (except `water=river`), `landuse=basin, reservoir, aquaculture`, `waterway=dock` |
 
-2. OSM-Flächen unter **150 Einheiten²** (~120 m²) fallen weg (Übernahmequote springt dort).
-3. Die Flächen werden nach ihrer osmium-Id sortiert verarbeitet. Die Reihenfolge
-   entscheidet, welches Polygon als erstes in eine Vereinigung eingeht, und die
-   Schreibreihenfolge des Extraktors (die Puffer-Reihenfolge von libosmium) ist nicht
-   nachbaubar — sortiert ist das Ergebnis reproduzierbar.
-4. Alle Flächen einer Klasse werden **verschmolzen**: Nachbarparzellen mit gemeinsamer Kante
-   sind im Original ein Ring (daher teilen nur ~70 % der Äcker ihre Knoten mit dem Original).
-5. `hi` je verschmolzener Fläche (s. o.), dann **Douglas-Peucker mit 4 Einheiten** (weggelassene
-   OSM-Knoten liegen im Original höchstens 4 Einheiten neben dem Ring), Zuschnitt auf die
-   Geofabrik-Grenze und die 4096er-Blöcke.
-6. **Meer:** Das Original nutzt eine weltweite Küstenlinie (Schweden, Norwegen, Deutschland
-   inklusive). Innerhalb der Grenze baut der Compiler das Meer neu aus `natural=coastline`
-   (Ketten zusammensetzen, Land links; offene Ketten enden weit außerhalb und werden gerade
-   geschlossen), außerhalb übernimmt er `#OW` aus der Originaldatei.
-7. Tiles ohne Zelle innerhalb der Grenze (die **Färöer**) werden unverändert aus dem Original
-   kopiert. Wie im Original stehen alle 16 Zellen jedes Tiles in der Datei (leere entfallen).
+2. OSM areas below **150 units²** (~120 m²) are dropped (the adoption rate jumps there).
+3. The areas are processed sorted by their osmium id. The order decides which polygon enters
+   a union first, and the extractor's write order (libosmium's buffer order) cannot be
+   reproduced — sorted, the result is reproducible.
+4. All areas of one class are **merged**: in the original, neighbouring parcels sharing an
+   edge are one ring (which is why only ~70 % of the fields share their nodes with the
+   original).
+5. `hi` per merged area (see above), then **Douglas-Peucker with 4 units** (dropped OSM
+   nodes lie at most 4 units off the ring in the original), clipping to the Geofabrik
+   boundary and to the 4096-unit blocks.
+6. **Sea:** the original uses a worldwide coastline (Sweden, Norway and Germany included).
+   Inside the boundary the compiler rebuilds the sea from `natural=coastline` (joining
+   chains, land on the left; open chains end far outside and are closed with a straight
+   line), outside it takes `#OW` from the original file.
+7. Tiles with no cell inside the boundary (the **Faroe Islands**) are copied unchanged from
+   the original. As in the original, all 16 cells of every tile are in the file (empty ones
+   are dropped).
 
-Ergebnis gegen das Original (beide aus `denmark-220101` gebaut, Flächensumme je Klasse):
-Siedlung, Industrie, Acker, Wiese, Friedhof, Strand, Handel ±8 %, Meer 100 %, Wald +13 %,
-Feuchtgebiet +32 % (vermutlich OSM-Änderungen), Binnengewässer −12 % (im Original sind
-außerdem Gewässer jenseits der Grenze enthalten). Aus `denmark-latest` (2026-09-18):
-700.620 Flächen, 26,4 MB, auf dem Gerät installiert.
+The result against the original (both built from `denmark-220101`, total area per class):
+built-up land, industry, farmland, meadow, cemetery, beach and commercial ±8 %, sea 100 %,
+forest +13 %, wetland +32 % (OSM changes, presumably), inland water −12 % (the original also
+contains water beyond the boundary). From `denmark-latest` (2026-09-18): 700,620 areas,
+26.4 MB, installed on the device.
 
-## Offen
+## Open questions
 
-1. Klassen 12–15 (in DK nicht belegt).
-2. Genaue Zeichenreihenfolge c3/c5/c6 und die Reihenfolge der c5-Objekte (Compiler: grob wie
-   im Original, `CLASS_ORDER`).
-3. Warum ~8 % der Bounding-Boxen größer als die Punkte sind.
-4. Laufzeit: Python braucht für Dänemark 1 min Extraktion und 2,5 min Compiler (das
-   Verschmelzen der großen Klassen und das Einlesen des Original-Meers), die
-   Rust-Portierung 1 min vom PBF bis zur Datei.
+1. Classes 12–15 (not used in DK).
+2. The exact drawing order of c3/c5/c6 and the order of the c5 objects (the compiler is
+   roughly like the original, `CLASS_ORDER`).
+3. Why ~8 % of the bounding boxes are larger than their points.
+4. Runtime: for Denmark Python needs 1 min for the extraction and 2.5 min for the compiler
+   (merging the large classes and reading the original's sea), the Rust port 1 min from the
+   PBF to the file.

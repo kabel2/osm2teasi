@@ -50,7 +50,7 @@ def pixels(jpg):
 def main(pa, pb, images):
     a, b = regions(open(pa, "rb").read()), regions(open(pb, "rb").read())
     if a.keys() != b.keys():
-        print("verschiedene Regionen:", sorted(set(a) ^ set(b)))
+        print("regions differ:", sorted(set(a) ^ set(b)))
         return 1
     bad = dem_eq = dem_ver = dem_dif = jpg_eq = jpg_dif = 0
     worst = (0, 0.0, None)
@@ -60,13 +60,13 @@ def main(pa, pb, images):
         jb, db = b[key]
         for k in range(85):
             if (da[k] is None) != (db[k] is None) or (ja[k] is None) != (jb[k] is None):
-                print(f"{key} Zelle {k}: vorhanden {da[k] is not None}/{db[k] is not None}"
-                      f" bzw. {ja[k] is not None}/{jb[k] is not None}")
+                print(f"{key} cell {k}: height present {da[k] is not None}/{db[k] is not None},"
+                      f" image {ja[k] is not None}/{jb[k] is not None}")
                 bad += 1
                 continue
             if da[k] is not None:
                 if da[k][:2] != db[k][:2]:
-                    print(f"{key} Zelle {k}: a0/a1 {da[k][:2]} vs {db[k][:2]}")
+                    print(f"{key} cell {k}: a0/a1 {da[k][:2]} vs {db[k][:2]}")
                     bad += 1
                 elif da[k][2] == db[k][2]:
                     dem_eq += 1
@@ -75,7 +75,7 @@ def main(pa, pb, images):
                 else:
                     dem_dif += 1
                     if dem_dif <= 5:
-                        print(f"{key} Zelle {k}: JP2 weicht ab"
+                        print(f"{key} cell {k}: the JP2 differs"
                               f" ({len(da[k][2])} vs {len(db[k][2])} B)")
             if ja[k] is not None:
                 sizes[0] += len(ja[k])
@@ -90,12 +90,12 @@ def main(pa, pb, images):
                         rms = float(np.sqrt((d.astype(np.float64) ** 2).mean()))
                         if (int(d.max()), rms) > worst[:2]:
                             worst = (int(d.max()), rms, (key, k))
-    print(f"Höhenkacheln: {dem_eq} bytegleich, {dem_ver} nur in der OpenJPEG-Version,"
-          f" {dem_dif} abweichend")
-    print(f"Kartenbilder: {jpg_eq} bytegleich, {jpg_dif} abweichend,"
-          f" {sizes[0]} vs {sizes[1]} B gesamt")
+    print(f"elevation tiles: {dem_eq} byte-identical, {dem_ver} differing only in the"
+          f" OpenJPEG version, {dem_dif} differing")
+    print(f"map images: {jpg_eq} byte-identical, {jpg_dif} differing,"
+          f" {sizes[0]} vs {sizes[1]} B in total")
     if images and worst[2]:
-        print(f"  schlimmstes Bild {worst[2]}: max {worst[0]}, RMS {worst[1]:.2f} von 255")
+        print(f"  worst image {worst[2]}: max {worst[0]}, RMS {worst[1]:.2f} out of 255")
     return 1 if bad or dem_dif else 0
 
 

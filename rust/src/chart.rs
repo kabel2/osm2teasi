@@ -1,6 +1,6 @@
 //! The outer shell of a chart file: header, checksum, tile directory, records.
 //! Port of tools/chart.py; the format is documented in
-//! docs/KARTEN_ENTSCHLUESSELUNG.md sections 1 to 4.
+//! docs/CHART_FILES.md sections 1 to 4.
 
 use anyhow::{bail, Result};
 use md5::{Digest, Md5};

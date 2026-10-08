@@ -1,7 +1,7 @@
 //! Write chart files: the inverse of chart.rs.  Port of tools/writer.py.
 //!
 //! Header fields as read by the chart loader FUN_003f282c (see
-//! docs/KARTEN_ENTSCHLUESSELUNG.md 1): 0x44 date, 0x4C type, 0x50 layer,
+//! docs/CHART_FILES.md 1): 0x44 date, 0x4C type, 0x50 layer,
 //! 0x54 country, 0x58..0x6C buffer sizes, 0x70 offset of the extra table
 //! (only used when layer & 0x10, i.e. ta), else -1.
 

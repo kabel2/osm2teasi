@@ -3,7 +3,7 @@
 Output (pickle): {"ways": [(way_id, tags)], "rels": {way_id: [(route, network, ref)]},
                   "w": way index per node, "i": position in the way, "nid": node id,
                   "X", "Y": global Teasi coordinates in 360/2^28 deg units (float64)}
-Teasi 32x32 cells use X = cell_x * 32768 + u, Y = cell_y * 32768 + v (KARTEN_ENTSCHLUESSELUNG.md 1a).
+Teasi 32x32 cells use X = cell_x * 32768 + u, Y = cell_y * 32768 + v (CHART_FILES.md 1a).
 
 With --filter only the ways compile_osm.py uses (road_class or line_type) are kept; needed
 for large extracts (Great Britain).  The node columns are typed arrays, not lists.
