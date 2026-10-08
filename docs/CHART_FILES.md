@@ -427,8 +427,12 @@ file name. With the entries updated the message disappears (checked on the devic
 without an entry** are not checked but are loaded anyway: the firmware reads every `*.v*` in
 `Countries`. That is how the Great Britain files run (5.7) — they have no entry at all, and
 no message appears. So a map under a name of its own needs no change to `packages.xml`; only
-replacing a file that is listed there does. Two cases are untested: an entry whose file has
-been renamed away, and two files for the same country in `Countries` at once.
+replacing a file that is listed there does. **An entry whose file is gone** fails the check as
+well: replacing the original `Germany_*.v2021…` with `Germany_*.v20261008` brought the
+message back until the six entries pointed at the new names, sizes and MD5s (checked on the
+device, 2026-10-09). So whoever replaces one of the original maps (DE, DK, NO, SE) either
+updates its entries or deletes them. Still untested: two files for the same country in
+`Countries` at once.
 
 **Passing a map on to someone else** needs `--generic` (section 2), because a file signed for
 one serial does not open on another device. The recipient copies the file in and the device

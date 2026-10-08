@@ -1,5 +1,8 @@
 # Teasi maps from OpenStreetMap
 
+> **Note:** This project was created with AI. The reverse engineering, the code and the
+> documentation were written by Claude (Anthropic), guided and tested on the device by a human.
+
 Tools to read and write the chart files of a **Teasi PRO** (Tahuna/Falk, `bikenav.exe`
 4.4.1.0, WinCE/ARM) and to rebuild them from current OSM data.
 
@@ -12,6 +15,18 @@ from a Geofabrik extract.
 **Status:** Great Britain is built completely and runs on the device — map, POIs, elevation
 profile, address search and routing. What is left is a handful of individual fields, see
 [docs/CHART_FILES.md](docs/CHART_FILES.md), section 8.
+
+**Tested on:**
+
+| | |
+|---|---|
+| Device | TEASI PRO (`BikeNav/deviceid.dat` says `Teasi PRO`), serial prefix `20130212` |
+| Software | BikeNav 4.4.1.0, SVN 26268, built 2020-06-05 (update package 4410, the last one) |
+| Original maps | map update 5130 (2021-09-29), basemap 5010 (2020-03-09) |
+| Platform | Windows CE on ARM, 4 GB internal storage (FAT, label `TFAT`) |
+
+Other TEASI models (ONE, Pro Pulse, Volt) are untested. The software version of your own
+device is in `BikeNav/settings.xml`, the first line.
 
 ## The layers
 
@@ -151,10 +166,10 @@ whose serial starts with one of those prefixes, which is what makes it worth pas
 
 `BikeNav/packages.xml` lists size and MD5 for every map file it knows. If they do not
 match, the device shows a warning at startup and loads the map anyway; a file with no entry
-is not checked at all. Giving a new map its own file name is therefore enough — nothing in
-`packages.xml` has to be touched. `teasi info` prints both values for a file, ready to paste
-into its `<size>` and `<md5>` if you do want to replace a map that is listed there
-(documentation section 5.4).
+is not checked at all, but an entry whose file is gone fails too. A new country therefore
+needs nothing in `packages.xml`; replacing one of the original maps (Denmark, Germany,
+Norway, Sweden) does: remove the old files and point their six entries at the new ones —
+`teasi info` prints the `<size>` and `<md5>` to paste in (documentation section 5.4).
 
 ## What is not in here
 

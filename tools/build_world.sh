@@ -112,8 +112,10 @@ while IFS=$'\t' read -r continent region code country prefix; do
         echo
         echo "Copy every *.v$date file into BikeNav/Map/Countries/ on the device."
         echo "Confirm the USB connection on the display first, or the volume stays"
-        echo "unreadable.  Nothing has to be changed in BikeNav/packages.xml: a file"
-        echo "without an entry there is loaded without a checksum check."
+        echo "unreadable.  BikeNav/packages.xml only matters when this replaces one of"
+        echo "the original maps (Denmark, Germany, Norway, Sweden): their entries still"
+        echo "name the old files, and the device warns at startup until they point at"
+        echo "the new ones -- \`teasi info <file>\` prints the size and md5 to put in."
         echo
         echo "The device loads one file per layer and country and keeps the one with"
         echo "the newest date, so delete an older map of $country before copying, or"
