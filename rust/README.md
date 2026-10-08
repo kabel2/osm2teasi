@@ -504,7 +504,7 @@ Pyramide 4×4, 2×2, 1×1. Die Höhen kommen aus `heights.rs` (dem Export von
 
 # mit Kartenbildern (braucht libgeos, s. o.)
 ./target/release/teasi terrain --country=17 \
-    --land=land-polygons-split-4326/land_polygons.shp \
+    --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
     --area=osm_ref/great-britain-latest.osm.pbf \
     build/gb/dem.bin osm_ref/great-britain.poly out 20260919    # 1:24, 7,9 GB
 ```

@@ -339,7 +339,7 @@ und ruft OpenJPEG für die Höhenkacheln auf. Siehe [../rust/README.md](../rust/
 
 ```bash
 ./target/release/teasi terrain --country=17 \
-    --land=land-polygons-split-4326/land_polygons.shp \
+    --land=osm_ref/land-polygons-split-4326/land_polygons.shp \
     --area=osm_ref/great-britain-latest.osm.pbf \
     build/gb/dem.bin osm_ref/great-britain.poly \
     build/gb/GreatBritain_terrain.v20260919 20260919      # 1:24, 7,9 GB
