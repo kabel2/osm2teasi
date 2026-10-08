@@ -245,7 +245,7 @@ keine Strings. Es ist **kein grobes Netz**, sondern der vollständige Graph alle
 |---|---|
 | `[0]` | Bits 0–19 = **Länge** (wie `a1[7]`), Bit 20 = 0, Bits 21–24 = **Straßenklasse** (wie `a1[7] >> 27`), Bits 25–29 = **Wegkategorie** (s. u.), Bit 30 = **in dieser Richtung befahrbar** (0 bei Einbahn gegen die Richtung), Bit 31 = 1 |
 | `[1]` | **Flags**, identisch mit `a1[6]` (99,9 %) |
-| `[2]` | **Anstieg in cm** in Fahrtrichtung (Summe der Höhengewinne); Router-Kosten `Gewicht₁·Länge + Gewicht₂·[2]`. Aus `[2](u→v) − [2](v→u) = h(v) − h(u)` lassen sich Knotenhöhen zurückrechnen, 97,5 % der Kanten passen auf 50 cm (`tools/osm_heights.py`) |
+| `[2]` | **Anstieg in cm** in Fahrtrichtung (Summe der Höhengewinne); Router-Kosten `Gewicht₁·Länge + Gewicht₂·[2]`. Aus `[2]`(u→v) − `[2]`(v→u) = h(v) − h(u) lassen sich Knotenhöhen zurückrechnen, 97,5 % der Kanten passen auf 50 cm (`tools/osm_heights.py`) |
 | `[3]` | **Zielknoten**: Bits 25–31 = dx + 64, Bits 18–24 = dy + 64 (Versatz der 8×8-Zelle des Ziels), Bits 0–17 = Knotenindex dort. `0x81…` = gleiche Zelle |
 
 Wegkategorie (Bits 25–29, abgeglichen mit OSM): 18 = trunk/primary/secondary (+ Auffahrten),
