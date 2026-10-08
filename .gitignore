@@ -1,0 +1,20 @@
+# Nur Code und Dokumentation gehören ins Repo.
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Arbeitsdaten (zu groß, fremde Lizenzen, gerätegebunden)
+/build/
+/charts/
+/osm_ref/
+/firmware/
+/terrain_tiles/
+/dem/
+*.osm.pbf
+*.poly
+*.pkl
+*.shp
+*.dbf
+*.shx
+*.tif
