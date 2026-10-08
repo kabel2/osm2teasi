@@ -252,7 +252,7 @@ directions).
 |---|---|
 | `[0]` | bits 0–19 = **length** (as in `a1[7]`), bit 20 = 0, bits 21–24 = **street class** (as in `a1[7] >> 27`), bits 25–29 = **way category** (see below), bit 30 = **passable in this direction** (0 for a one-way against the direction), bit 31 = 1 |
 | `[1]` | **flags**, identical with `a1[6]` (99.9 %) |
-| `[2]` | **ascent in cm** in the direction of travel (the sum of the height gains); the router's cost is `weight₁·length + weight₂·[2]`. From `[2]`(u→v) − `[2]`(v→u) = h(v) − h(u) the node heights can be reconstructed, and 97.5 % of the edges agree to within 50 cm |
+| `[2]` | **ascent in cm** in the direction of travel (the sum of the height gains); the router's cost is `weight₁·length + weight₂·[2]`. From `[2]`(u→v) − `[2]`(v→u) = h(v) − h(u) the node heights of the original can be reconstructed |
 | `[3]` | **target node**: bits 25–31 = dx + 64, bits 18–24 = dy + 64 (the offset of the target's 8×8 cell), bits 0–17 = the node index there. `0x81…` = the same cell |
 
 Way category (bits 25–29, matched against OSM): 18 = trunk/primary/secondary (plus the
@@ -297,12 +297,13 @@ Likewise `parse_a`/`build_a`, `parse_b`/`build_b`, `parse_c`/`build_c`.
 ## Building it from OSM
 
 ```bash
-teasi osm --heights=build/ref/heights.bin osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
+teasi dem osm_ref/denmark.poly osm_ref/dem_dk build/latest/dem.bin           # 43 tiles, 1.2 s cached
+teasi osm --heights=build/latest/dem.bin osm_ref/denmark-latest.osm.pbf osm_ref/denmark.poly \
     2013021200000368/7/943/20317/Denmark_osm.v20210916 \
     build/latest/Denmark_osm.v20210916 20260918            # 66 s
 ```
 
-One command from the extract to the chart file; `--heights` is the elevation data, see below.
+Two commands from the extract to the chart file; `--heights` is the elevation data, see below.
 It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.rs`:
 
 1. **Streets**: ways with a `highway` from the class table (without `area=yes`) and
@@ -334,16 +335,16 @@ It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.
    the whole country at once, the B, D and A records afterwards **tile by tile**. Great
    Britain needs 16 GB for that and takes 4:13 from the PBF to the file.
 
+**The ascents** come from the **Copernicus DEM GLO-90** (`teasi dem`: tiles from the public
+AWS bucket `copernicus-dem-90m`, resampled onto a 3″ grid, Gaussian smoothing σ = 1 grid
+point, because the model is a surface model with trees and houses). Calibrated on Denmark
+against the original ascents: σ = 0 gives a correlation of 0.76 (sum 1.77×), **σ = 1 a
+correlation of 0.84 and a median ratio of 0.97**, 61 % within 10 cm, 88 % within 50 cm;
+σ = 2 gives 0.80, σ = 4 gives 0.69. Without `--heights` every ascent stays 0.
+
 **Countries without an original file** (Great Britain): pass `-` as the original, and then
 c2/c4 stay empty and nothing is copied; `--country=N` (the header's country code,
-CHART_FILES.md 1), `--name=<country>` (the country name in the A record). The ascents come
-from the **Copernicus DEM GLO-90** (`teasi dem`: tiles from the public AWS bucket
-`copernicus-dem-90m`, resampled onto a 3″ grid, Gaussian smoothing σ = 1 grid point, because
-the model is a surface model with trees and houses). Calibrated on Denmark against the
-original ascents: σ = 0 gives a correlation of 0.76 (sum 1.77×), **σ = 1 a correlation of
-0.84 and a median ratio of 0.97**, 61 % within 10 cm, 88 % within 50 cm; σ = 2 gives 0.80,
-σ = 4 gives 0.69. The reconstruction from the original ascents is slightly better at 0.88
-and was what the Danish map was rebuilt with.
+CHART_FILES.md 1), `--name=<country>` (the country name in the A record).
 
 ```bash
 teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin    # 234 tiles, 3.6 s cached
@@ -362,7 +363,7 @@ a median of 1.000 (p10/p90 0.997/1.001). The graph: 96 % of the node positions a
 91 % of the edges are assigned directly, and class/category/passability agree down to a few
 hundred cases. Left turns: whether a node has entries agrees 99.9 %; the pairs (compared via
 the target positions) 85 %, with the rest being deviations in the neighbouring positions.
-Ascent: correlation 0.88, 86 % within 10 cm, 96 % within 50 cm, median ratio 1.00. The build
+Ascent (from the DEM grid, σ = 1): see the calibration above. The build
 from `denmark-latest` (2026) has 38 % more edges (3.0 instead of 2.2 M) and is 92 MB
 (the original 63 MB); the largest records (B 4.2 MB, D 1.0 MB) stay below those of the German
 map (6.5 / 1.3 MB). The cost factor (bits 20–23) and bit 28 stay 0.

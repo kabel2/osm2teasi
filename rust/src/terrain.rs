@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{ensure, Result};
 use rayon::prelude::*;
 
 use crate::area::{Extract, Poly};
@@ -112,12 +112,10 @@ pub fn cover_class(k: &str, v: &str) -> Option<u8> {
     })
 }
 
-/// Bilinear heights of the grid at `lat` (rows) x `lon` (columns), in metres.
-/// Port of `sample()`, including its zeroing outside the grid.
-fn sample(g: &Heights, lat: &[f64], lon: &[f64]) -> Result<Vec<f64>> {
-    let Heights::Grid { rows, cols, lon0, lat0, step, z } = g else {
-        bail!("the terrain layer needs an elevation grid (teasi dem), not node heights");
-    };
+/// Bilinear heights of the grid at `lat` (rows) x `lon` (columns), in metres,
+/// zeroed outside the grid.
+fn sample(g: &Heights, lat: &[f64], lon: &[f64]) -> Vec<f64> {
+    let Heights { rows, cols, lon0, lat0, step, z } = g;
     let rs: Vec<(usize, f64)> = lat
         .iter()
         .map(|&la| {
@@ -150,7 +148,7 @@ fn sample(g: &Heights, lat: &[f64], lon: &[f64]) -> Result<Vec<f64>> {
             *v = (a * (1.0 - fc) + b * fc) * (1.0 - fr) + (d * (1.0 - fc) + e * fc) * fr;
         }
     });
-    Ok(out)
+    out
 }
 
 /// Hillshade (flat = 1) of the heights `h` (`side` x `side` with a 1 px margin),
@@ -441,7 +439,7 @@ fn region(
         (-1..=R as i64).map(|i| lat_n - (i as f64 + 0.5) / R as f64 * TILE).collect();
     let lon: Vec<f64> =
         (-1..=R as i64).map(|i| lon_w + (i as f64 + 0.5) / R as f64 * TILE).collect();
-    let hm = sample(g, &lat, &lon)?;
+    let hm = sample(g, &lat, &lon);
     let side = R + 2;
 
     let jpgs = match (p, areas) {

@@ -336,17 +336,6 @@ them (`tests/compat.rs`):
   million by an ULP — with the order right, the whole 1.35 GB grid for Great Britain matches
   scipy's own output byte for byte.
 
-`heights.rs` also reads heights **per node**, which is how the Danish map was reproduced
-exactly: the ascents of an original chart are an over-determined linear system for its node
-heights, and solving it (a sparse least squares over 2.1 M equations) gives them back to
-within 50 cm for 97.5 % of the edges. That only works where an original file exists, so the
-solver is not part of this binary — the node heights it produced are read from the same flat
-file as a grid.
-
-For the node heights the 4 nearest neighbours are needed (inverse distance²). Instead of a
-kd-tree, a uniform grid lies over the known points and is searched ring by ring outwards
-until the next ring cannot be any closer — the same result, only without a tree.
-
 ### What comes out
 
 ```bash
@@ -368,11 +357,6 @@ What that is made of: Denmark 1,454,524 streets and 83,581 lines, 1,816,001 shar
 3,004,615 edges, 2,404,747 graph nodes in 354 B cells (336 kept), 134 A, 336 B, 5129 D and
 95 C records, 21 tiles including the three copied Faroese tiles — Great Britain
 7,861,689/619,761, 15,029,377 edges, 12,119,884 graph nodes, 20,507 D records.
-
-One ambiguity is worth knowing about when the heights come from a reconstruction rather than
-the grid: 16 pairs of Danish node heights sit at the **same position** and carry different
-values (up to 6 cm apart), so for 5 of 3,004,615 edges it is arbitrary which of the two
-enters the mean of the 4 neighbours, and the ascent lands 1 cm either way.
 
 ## The ta layer (address search)
 

@@ -13,7 +13,8 @@
 //! latitude (1200 columns below 50 N, 800 up to 60 N, 600 above), which is what
 //! the decimation to 1200 columns is for.
 //!
-//! Output is the flat file `heights.rs` reads, see there for the layout.
+//! Output is the grid of `heights.rs`, written out as the flat file both
+//! compilers read back.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use std::time::Duration;
 use anyhow::{bail, ensure, Context, Result};
 use rayon::prelude::*;
 
+use crate::heights::Heights;
 use crate::poly::Ring;
 
 /// Grid points per degree (3").
@@ -32,38 +34,6 @@ pub const SIGMA: f64 = 1.0;
 const TRUNCATE: f64 = 4.0;
 
 const BUCKET: &str = "https://copernicus-dem-90m.s3.amazonaws.com";
-
-/// A regular grid of heights in m, rows running north to south.
-pub struct Grid {
-    pub rows: usize,
-    pub cols: usize,
-    /// Western edge in degrees.
-    pub lon0: f64,
-    /// **Northern** edge in degrees (the first row).
-    pub lat0: f64,
-    /// Degrees per grid point.
-    pub step: f64,
-    pub z: Vec<f32>,
-}
-
-impl Grid {
-    /// Write the flat file `teasi osm --heights=` and `teasi terrain` read.
-    pub fn write(&self, path: &str) -> Result<()> {
-        let mut out = Vec::with_capacity(44 + 4 * self.z.len());
-        out.extend_from_slice(b"TEASIHT1");
-        out.extend_from_slice(&1u32.to_le_bytes()); // kind 1 = grid
-        out.extend_from_slice(&(self.rows as u64).to_le_bytes());
-        out.extend_from_slice(&(self.cols as u64).to_le_bytes());
-        out.extend_from_slice(&self.lon0.to_le_bytes());
-        out.extend_from_slice(&self.lat0.to_le_bytes());
-        out.extend_from_slice(&self.step.to_le_bytes());
-        for v in &self.z {
-            out.extend_from_slice(&v.to_le_bytes());
-        }
-        std::fs::write(path, &out).with_context(|| format!("write {}", path))?;
-        Ok(())
-    }
-}
 
 // --------------------------------------------------------------------------
 // downloading
@@ -354,7 +324,7 @@ pub fn gaussian(z: &[f32], rows: usize, cols: usize, sigma: f64) -> Vec<f32> {
 
 /// Download the tiles covering `rings` and build the smoothed grid.  `sigma`
 /// of 0 leaves the DEM unsmoothed.
-pub fn build(rings: &[Ring], tdir: &Path, sigma: f64, log: &dyn Fn(&str)) -> Result<Grid> {
+pub fn build(rings: &[Ring], tdir: &Path, sigma: f64, log: &dyn Fn(&str)) -> Result<Heights> {
     ensure!(!rings.is_empty(), "the boundary polygon is empty");
     let (mut west, mut east) = (f64::MAX, f64::MIN);
     let (mut south, mut north) = (f64::MAX, f64::MIN);
@@ -406,5 +376,5 @@ pub fn build(rings: &[Ring], tdir: &Path, sigma: f64, log: &dyn Fn(&str)) -> Res
     if sigma > 0.0 {
         z = gaussian(&z, rows, cols, sigma);
     }
-    Ok(Grid { rows, cols, lon0: lon0 as f64, lat0: lat1 as f64, step: 1.0 / N as f64, z })
+    Ok(Heights { rows, cols, lon0: lon0 as f64, lat0: lat1 as f64, step: 1.0 / N as f64, z })
 }

@@ -1,7 +1,7 @@
-//! A uniform bucket grid over points, for the neighbour searches the ta and
-//! osm layers need.  scipy uses a kd-tree (`cKDTree`); with a handful of
-//! neighbours out of a dense cloud the result is the same set, and equal
-//! distances are broken by index here.
+//! A uniform bucket grid over points, for the neighbour searches of the ta
+//! layer.  scipy uses a kd-tree (`cKDTree`); with a handful of neighbours out
+//! of a dense cloud the result is the same set, and equal distances are broken
+//! by index here.
 
 /// Points in buckets of about two points each.
 pub struct Grid {
