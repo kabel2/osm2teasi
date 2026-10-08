@@ -199,9 +199,9 @@ teasi ta --country=17 "--name=United Kingdom" osm_ref/great-britain-latest.osm.p
     osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919
 ```
 
-One command from the extract to the chart file: 3:19 and 13.7 GB for Great Britain, 40 s for
-Denmark. It needs libgeos and reads the PBF twice, because it needs both the addresses and
-the streets.
+One command from the extract to the chart file: 2:24 and 4.7 GB for Great Britain, 7:40 and
+11.0 GB for Germany, 25 s for Denmark. It needs libgeos and reads the PBF twice, because it
+needs both the addresses and the streets.
 
 - `addr.rs` reads every address (`addr:housenumber` with `addr:street`), the interpolation
   lines (`addr:interpolation`) and the places (`place=*` with a name).

@@ -428,10 +428,11 @@ pub fn country(s: &str) -> Result<(u32, Option<&'static str>, Option<&'static st
     // "New South Wales" and "Quebec" also find "New South Wales (Australia)"
     // and "Quebec_Canada" -- the accent-free prefix is what makes the latter work
     let head = |n: &str| norm(n.split(['(', '_']).next().unwrap_or(n));
-    if let Some(&(name, code, _, file)) = COUNTRIES
-        .iter()
-        .find(|(n, _, i, f)| [norm(n), norm(i), norm(f), head(n), head(f)].contains(&q))
-    {
+    // a full match first: "Georgia" is the country, "Georgia (United States)"
+    // only matches it by the part before the bracket
+    let full = COUNTRIES.iter().find(|(n, _, i, f)| [norm(n), norm(i), norm(f)].contains(&q));
+    let part = || COUNTRIES.iter().find(|(n, _, _, f)| [head(n), head(f)].contains(&q));
+    if let Some(&(name, code, _, file)) = full.or_else(part) {
         return Ok((code, Some(name), Some(file)));
     }
     let code = s

@@ -36,6 +36,7 @@ OSM" (commands, runtime, RAM) and a section "Open questions".
 rust/             everything: the shell, reading OSM, all six compilers, the DEM
 docs/             format documentation, start with CHART_FILES.md
 ghidra_scripts/   headless scripts for analysing the firmware in Ghidra
+tools/            build_world.sh and its region list: every Geofabrik region as a zip
 ```
 
 One binary, `teasi`, with a subcommand per job — [rust/README.md](rust/README.md) describes
@@ -56,9 +57,11 @@ export TEASI_DEVICE=2013021200000368        # the serial of your own device
 ```
 
 That builds the elevation grid and all six layer files, named the way the device expects
-them, and prints their size and MD5 at the end. Denmark takes about three and a half
-minutes, Great Britain about thirteen with a peak of 16 GB of memory — the street layer is
-the expensive part.
+them, and prints their size and MD5 at the end. Denmark takes about three minutes with a
+peak of 2.5 GB of memory, Great Britain (2.2 GB extract) about ten minutes with 6.4 GB,
+Germany (4.9 GB extract) about 35 minutes with 13.3 GB. The layers are built one after the
+other, so the peak is that of the most expensive one: the areas, then the streets and the
+address search.
 
 What you need:
 
@@ -91,6 +94,21 @@ The device only loads countries that are unlocked for it, and only one file per 
 country: a file is skipped if one with the same or a newer **date** is already loaded. So
 either give your map a date newer than the one it replaces, or delete that file — an older
 date is silently ignored. Back up what is there before overwriting it.
+
+### Every region at once
+
+`tools/build_world.sh <out dir>` works through `tools/regions.tsv` — every region below a
+continent on Geofabrik, 264 of them, each with the country code the firmware has for it —
+and leaves one zip per region, with a README inside, in a folder per continent. It
+downloads one extract at a time, deletes it once the maps are built, signs with
+`--generic` and skips regions whose zip is already there, so it can be interrupted and
+started again. Extracts bigger than a third of the machine's memory are left out
+(`MAX_PBF_MB`); with 29 GB that is none of them.
+
+The list is generated: `teasi regions > tools/regions.tsv` reads Geofabrik's index and
+matches it against the firmware's country list. A country whose parts all have a code of
+their own is listed by part — the US states and the Canadian provinces — and a region of
+several countries gets the code of the biggest (`gcc-states` is Saudi Arabia).
 
 ## Looking at an existing map
 

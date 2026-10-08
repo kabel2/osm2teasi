@@ -22,12 +22,12 @@ pub const PLACES: [&str; 13] = [
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AddrTags {
-    pub hn: Option<String>,
-    pub street: Option<String>,
-    pub postcode: Option<String>,
-    pub city: Option<String>,
-    pub place: Option<String>,
-    pub suburb: Option<String>,
+    pub hn: Option<Box<str>>,
+    pub street: Option<Box<str>>,
+    pub postcode: Option<Box<str>>,
+    pub city: Option<Box<str>>,
+    pub place: Option<Box<str>>,
+    pub suburb: Option<Box<str>>,
 }
 
 impl AddrTags {
@@ -39,11 +39,11 @@ impl AddrTags {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PlaceTags {
-    pub place: Option<String>,
-    pub name: Option<String>,
-    pub name_en: Option<String>,
-    pub population: Option<String>,
-    pub is_in: Option<String>,
+    pub place: Option<Box<str>>,
+    pub name: Option<Box<str>>,
+    pub name_en: Option<Box<str>>,
+    pub population: Option<Box<str>>,
+    pub is_in: Option<Box<str>>,
 }
 
 impl PlaceTags {
@@ -57,7 +57,7 @@ impl PlaceTags {
 struct Tags {
     addr: AddrTags,
     place: PlaceTags,
-    interpolation: Option<String>,
+    interpolation: Option<Box<str>>,
     any: bool,
     multipolygon: bool,
 }
@@ -66,7 +66,7 @@ fn tags_of<'a, I: Iterator<Item = (&'a str, &'a str)>>(it: I) -> Tags {
     let mut t = Tags::default();
     for (k, v) in it {
         t.any = true;
-        let s = || Some(v.to_string());
+        let s = || Some(Box::<str>::from(v));
         match k {
             "addr:housenumber" => t.addr.hn = s(),
             "addr:street" => t.addr.street = s(),
@@ -105,10 +105,10 @@ pub struct Place {
 
 #[derive(Clone, Debug)]
 pub struct Interp {
-    pub kind: String,
-    pub street: Option<String>,
+    pub kind: Box<str>,
+    pub street: Option<Box<str>>,
     /// (x, y, house number, street) per node of the way
-    pub pts: Vec<(f64, f64, Option<String>, Option<String>)>,
+    pub pts: Vec<(f64, f64, Option<Box<str>>, Option<Box<str>>)>,
 }
 
 #[derive(Default)]
@@ -221,15 +221,13 @@ fn pass2(path: &str, wanted_ways: &HashSet<i64>) -> Result<Pass2> {
 struct Pass3 {
     addr: Vec<Addr>,
     places: Vec<Place>,
-    pos: Vec<(i64, i32, i32)>,
     /// house number and street of the nodes an interpolation way uses
-    numbers: Vec<(i64, Option<String>, Option<String>)>,
+    numbers: Vec<(i64, Option<Box<str>>, Option<Box<str>>)>,
 }
 
 fn merge3(mut a: Pass3, b: Pass3) -> Pass3 {
     a.addr.extend(b.addr);
     a.places.extend(b.places);
-    a.pos.extend(b.pos);
     a.numbers.extend(b.numbers);
     a
 }
@@ -251,7 +249,7 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
     )));
 
     let since = lap();
-    let p2 = pass2(path, &wanted_ways)?;
+    let mut p2 = pass2(path, &wanted_ways)?;
     log(&since(format!(
         "pass 2: {} closed ways, {} interpolation ways, {} member ways found",
         p2.areas.len(),
@@ -264,9 +262,12 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
         ids.extend(g.refs.iter().copied());
     }
     let since = lap();
-    let mut index = NodeIndex::new(ids);
-    let interp_nodes: HashSet<i64> =
-        p2.interp.iter().flat_map(|g| g.refs.iter().copied()).collect();
+    let index = NodeIndex::new(ids);
+    let interp_nodes: HashSet<i64> = p2
+        .interp
+        .iter()
+        .flat_map(|g| g.refs.iter().copied())
+        .collect();
 
     let p3 = par_blocks(
         path,
@@ -274,9 +275,7 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
         |acc: &mut Pass3, block: &PrimitiveBlock| {
             let mut probe = index.probe();
             let mut one = |id: i64, dm_lon: i32, dm_lat: i32, tags: Tags| {
-                if probe.wants(id) {
-                    acc.pos.push((id, dm_lon, dm_lat));
-                }
+                probe.set(id, dm_lon, dm_lat);
                 if interp_nodes.contains(&id) && tags.addr.hn.is_some() {
                     acc.numbers.push((id, tags.addr.hn.clone(), tags.addr.street.clone()));
                 }
@@ -302,9 +301,6 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
         },
         merge3,
     )?;
-    for (id, lon, lat) in &p3.pos {
-        index.set(*id, *lon, *lat);
-    }
     log(&since(format!(
         "pass 3: {} address nodes, {} place nodes, {} of {} way nodes located",
         p3.addr.len(),
@@ -319,40 +315,56 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
 
     // areas: closed ways (one ring each) and multipolygons (one per member way)
     let by_id: HashMap<i64, &WayGeom> = p2.members.iter().map(|g| (g.id, g)).collect();
-    let mut areas: Vec<(&Tags, Vec<Vec<i64>>)> =
-        p2.areas.iter().map(|g| (&g.tags, vec![g.refs.clone()])).collect();
-    for r in &rels {
-        let ways: Vec<Vec<i64>> =
-            r.ways.iter().filter_map(|w| by_id.get(w).map(|g| g.refs.clone())).collect();
-        areas.push((&r.tags, ways));
-    }
-    let n_closed = p2.areas.len();
+    let (n_closed, n_rels) = (p2.areas.len(), rels.len());
     let mut open_rings = 0;
-    for (tags, ways) in &areas {
+    let mut add = |tags: Tags, ways: &[Vec<i64>]| {
         // libosmium only builds an area when the member ways close into rings
         let Some((x, y)) = area_rings(ways, &index).as_deref().and_then(area_centre) else {
             open_rings += 1;
-            continue;
+            return;
         };
-        if tags.addr.is_addr() {
-            out.addr.push(Addr { x, y, tags: tags.addr.clone() });
+        let (is_addr, is_place) = (tags.addr.is_addr(), tags.place.is_place());
+        if is_addr {
+            out.addr.push(Addr {
+                x,
+                y,
+                tags: tags.addr,
+            });
         }
-        if tags.place.is_place() {
-            out.places.push(Place { x, y, tags: tags.place.clone(), area: true });
+        if is_place {
+            out.places.push(Place {
+                x,
+                y,
+                tags: tags.place,
+                area: true,
+            });
         }
+    };
+    // closed ways (one ring each), then multipolygons (one per member way)
+    for g in std::mem::take(&mut p2.areas) {
+        add(g.tags, std::slice::from_ref(&g.refs));
+    }
+    for r in rels {
+        let ways: Vec<Vec<i64>> = r
+            .ways
+            .iter()
+            .filter_map(|w| by_id.get(w).map(|g| g.refs.clone()))
+            .collect();
+        add(r.tags, &ways);
     }
     log(&since(format!(
         "areas: {} from closed ways, {} from relations ({} without a closed ring)",
-        n_closed,
-        areas.len() - n_closed,
-        open_rings
+        n_closed, n_rels, open_rings
     )));
 
     // interpolation ways with the house numbers of their nodes
-    let numbers: HashMap<i64, (Option<String>, Option<String>)> =
-        p3.numbers.into_iter().map(|(id, hn, st)| (id, (hn, st))).collect();
+    let numbers: HashMap<i64, (Option<Box<str>>, Option<Box<str>>)> = p3
+        .numbers
+        .into_iter()
+        .map(|(id, hn, st)| (id, (hn, st)))
+        .collect();
     for g in &p2.interp {
-        let pts: Vec<(f64, f64, Option<String>, Option<String>)> = g
+        let pts: Vec<(f64, f64, Option<Box<str>>, Option<Box<str>>)> = g
             .refs
             .iter()
             .filter_map(|id| {

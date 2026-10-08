@@ -15,9 +15,13 @@ const LP: u32 = 0;
 const PB: u32 = 2;
 const DICT: u32 = 1 << 24;
 
-fn options() -> Result<LzmaOptions> {
+/// The encoder needs about ten times its dictionary in memory, 190 MB at 16
+/// MiB, and the writer runs one per thread.  A record never reaches back
+/// further than its own length, so the encoder gets a dictionary just big
+/// enough for it; the stream stays valid for the 16 MiB the decoder assumes.
+fn options(len: usize) -> Result<LzmaOptions> {
     let mut o = LzmaOptions::new_preset(6).context("lzma preset")?;
-    o.dict_size(DICT);
+    o.dict_size(len.next_power_of_two().clamp(4096, DICT as usize) as u32);
     o.literal_context_bits(LC);
     o.literal_position_bits(LP);
     o.position_bits(PB);
@@ -69,7 +73,7 @@ fn run(s: &mut Stream, input: &[u8], limit: Option<usize>) -> Result<Vec<u8>> {
 }
 
 pub fn compress(raw: &[u8]) -> Result<Vec<u8>> {
-    let mut s = Stream::new_lzma_encoder(&options()?).context("lzma encoder")?;
+    let mut s = Stream::new_lzma_encoder(&options(raw.len())?).context("lzma encoder")?;
     let mut out = run(&mut s, raw, None)?;
     if out.len() < 13 {
         bail!("lzma: output too short");

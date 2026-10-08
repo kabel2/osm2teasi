@@ -65,6 +65,7 @@ identical position get the same class, name and flags.
 | Command | Purpose |
 |---|---|
 | `teasi all <pbf> <poly> <dir> [date]` | the elevation grid and all six layers of one country (`--country=<name\|code>`, `--only=`, `--land=`, `--tiles=`, `--original=`, `--prefix=`) |
+| `teasi regions [index-v1.json]` | Geofabrik's regions with the firmware's country codes, the list `tools/build_world.sh` works through (`> tools/regions.tsv`) |
 | `teasi info <map>…` | header, tiles, record counts per slot area |
 | `teasi check <map>…` | take every record apart and rebuild it byte-identically |
 | `teasi roundtrip <map> [out]` | decrypt the whole file, write it again, compare the records |
@@ -98,7 +99,8 @@ rewriting the whole Danish osm file takes 61 s and cannot be pushed down much fu
 `pbf.rs` reads `.osm.pbf` files (the `osmpbf` crate), decodes the blocks in parallel and
 folds them into per-thread accumulators. Then the node index: only the ids that an earlier
 pass asked for are collected — sorted, 16 bytes per node — instead of an index over every
-node in the file.
+node in the file. The threads reading the nodes write the locations straight into it (they
+are atomics), so nothing is collected on the way.
 
 `addr.rs` extracts the addresses, places and interpolation ways in three passes, because a
 relation needs its member ways and those need their nodes:
@@ -269,7 +271,7 @@ That dump holds one line per area and coastline way, keyed by the osmium id.
 | coastline ways | 2230 | 28,184 |
 | polygons per class | 700,620 in 16 classes | 2,520,840 in 16 classes |
 | records | 340 | 1157 |
-| runtime (PBF → chart file) | 61 s | 190 s, 7.1 GB |
+| runtime (PBF → chart file) | 61 s | 193 s, 6.3 GB |
 
 The areas whose rings touch themselves are the ones that come out differently from libosmium
 — 55 in Denmark, 347 in Great Britain (see above) — and that reaches further than it sounds:
@@ -288,7 +290,9 @@ The largest compiler: it builds four kinds of record out of the street ways — 
 edges and lines, **A** with the name table, **B** with the routing graph and **C** with the
 overview lines. It holds the whole country at once, as flat `Vec`s with index columns rather
 than per-object structs — the 12.1 M graph nodes and 30 M edges of Great Britain fit in
-16 GB that way.
+6.4 GB that way, Germany's 23 M and 30 M in 12.2 GB. The ways arrive with their attributes
+already worked out rather than their tags, length and ascent are kept per edge, and each
+tile's records are compressed as soon as the tile is done.
 
 ```bash
 ./target/release/teasi ways osm_ref/denmark-latest.osm.pbf ways.txt   # the extractor alone
@@ -355,8 +359,8 @@ extractor can be diffed line by line — tag tables included.
 |---|---|---|
 | ways from the extractor | 1,538,105 | 8,481,450 |
 | records | 5982 | 22,711 |
-| file size | 92,253,033 B | 531,333,357 B |
-| runtime (PBF → chart file) | 66 s | 4:13, 16.0 GB |
+| file size | 92,253,033 B | 531,333,429 B |
+| runtime (PBF → chart file) | 66 s | 2:45, 6.4 GB |
 
 What that is made of: Denmark 1,454,524 streets and 83,581 lines, 1,816,001 shared nodes,
 3,004,615 edges, 2,404,747 graph nodes in 354 B cells (336 kept), 134 A, 336 B, 5129 D and
@@ -416,8 +420,8 @@ differently from one run to the next.
 |---|---|---|
 | records | 3958 | 13,680 |
 | search index | 1,943,962 B | 522,760 nodes |
-| file size | 24,644,993 B | 113,851,396 B |
-| runtime (PBF → chart file) | 40 s | 3:19, 13.7 GB |
+| file size | 24,644,993 B | 113,851,392 B |
+| runtime (PBF → chart file) | 40 s | 2:24, 4.7 GB |
 
 What that is made of: Denmark 408,262 named streets, 1,257,070 edges, 1,296,848 pieces,
 2,480,980 matched house numbers on 735,263 pieces, 117,162 streets, 99 A and 3859 D records,

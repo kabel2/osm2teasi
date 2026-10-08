@@ -25,7 +25,7 @@ use crate::layers::{
 };
 use crate::pbf::{TagMap, SCALE};
 use crate::way::{Route, Ways};
-use crate::writer::{self, Areas, Meta, TileContent};
+use crate::writer::{self, Areas, Meta, Packed};
 
 /// units per cell (D: 360/2^28 degrees, A/C: 360/2^25)
 pub const CELL: i64 = 32768;
@@ -124,7 +124,7 @@ pub fn road_class(t: &TagMap) -> Option<u32> {
     lookup(&CLASS, &t.get("highway")?)
 }
 
-fn category(cls: u32, t: &TagMap) -> u32 {
+pub fn category(cls: u32, t: &TagMap) -> u32 {
     if cls == 7 {
         return if t.get("highway") == Some("service") { 6 } else { 10 };
     }
@@ -133,16 +133,29 @@ fn category(cls: u32, t: &TagMap) -> u32 {
 
 /// a1 word [6] / B edge word [1]: the attribute bits (OSM_FORMAT.md).
 pub fn flags(t: &TagMap, rels: &[Route]) -> u32 {
-    let mut f: u32 = 0;
-    let junction = t.get("junction") == Some("roundabout");
-    f |= junction as u32;
+    tag_flags(t) | route_flags(rels)
+}
+
+/// The bits the route relations of a way set: the cycle networks and hiking.
+pub fn route_flags(rels: &[Route]) -> u32 {
     let net = |n: &str| {
         rels.iter()
             .any(|(r, netw, _)| matches!(&**r, "bicycle" | "mtb") && netw.as_deref() == Some(n))
     };
-    f |= (net("lcn") as u32) << 1 | (net("rcn") as u32) << 2 | (net("ncn") as u32) << 3;
+    let mut f = (net("lcn") as u32) << 1 | (net("rcn") as u32) << 2 | (net("ncn") as u32) << 3;
     f |= (net("icn") as u32) << 27;
-    f |= (rels.iter().any(|(r, _, _)| matches!(&**r, "hiking" | "foot")) as u32) << 18;
+    f |= (rels
+        .iter()
+        .any(|(r, _, _)| matches!(&**r, "hiking" | "foot")) as u32)
+        << 18;
+    f
+}
+
+/// The bits the tags of a way set.
+pub fn tag_flags(t: &TagMap) -> u32 {
+    let mut f: u32 = 0;
+    let junction = t.get("junction") == Some("roundabout");
+    f |= junction as u32;
     f |= (t.get("access").is_some_and(|v| RESTRICTED.contains(&v)) as u32) << 4;
     f |= (t.get("mtb:scale").is_some() as u32) << 5;
     f |= ((t.get("highway") == Some("bridleway")) as u32) << 6;
@@ -175,7 +188,7 @@ pub fn flags(t: &TagMap, rels: &[Route]) -> u32 {
 }
 
 /// (forward, backward) passable for bicycles.
-fn passable(t: &TagMap, cls: u32) -> (bool, bool) {
+pub fn passable(t: &TagMap, cls: u32) -> (bool, bool) {
     if cls == FERRY {
         return (true, true);
     }
@@ -564,7 +577,7 @@ pub fn build(
     p: &Geom,
     orig: Option<&Chart>,
     date: &[u8],
-    heights: Option<&Heights>,
+    heights: Option<Heights>,
     country: u32,
     cname: &str,
     sign: &chart::Signer,
@@ -589,33 +602,30 @@ pub fn build(
     let nw = ways.ids.len();
     let n = ways.w.len();
 
-    // way attributes: roads get a class, flags, category, direction and name,
-    // the other ways a line type
+    // way attributes: roads have a class, flags, category, direction and name,
+    // the other ways a line type; a way with less than two nodes is neither
     let mut cls = vec![-1i8; nw];
     let mut fl = vec![0u32; nw];
     let mut cat = vec![0u8; nw];
     let mut fwd = vec![false; nw];
     let mut bwd = vec![false; nw];
-    let mut names: Vec<String> = vec![String::new(); nw];
+    let mut names: Vec<Box<str>> = vec![Box::from(""); nw];
     let mut lines: Vec<(u32, LineType)> = Vec::new();
-    for k in 0..nw {
+    for (k, at) in std::mem::take(&mut ways.attr).into_iter().enumerate() {
         let (a, b) = ways.rows[k];
         if b - a < 2 {
             continue;
         }
-        let t = &ways.tags[k];
-        if let Some(c) = road_class(t) {
-            cls[k] = c as i8;
-            fl[k] = flags(t, ways.rels.get(&ways.ids[k]).map_or(&[][..], |v| &v[..]));
-            cat[k] = category(c, t) as u8;
-            (fwd[k], bwd[k]) = passable(t, c);
-            names[k] = t.get("name").unwrap_or("").to_string();
-        } else if let Some(lt) = line_type(t) {
+        if at.cls >= 0 {
+            cls[k] = at.cls;
+            fl[k] = at.flags;
+            cat[k] = at.cat;
+            (fwd[k], bwd[k]) = (at.fwd, at.bwd);
+            names[k] = at.name;
+        } else if let Some(lt) = at.line {
             lines.push((k as u32, lt));
         }
     }
-    ways.tags = Vec::new();
-    ways.rels = HashMap::new();
     log(&since(format!(
         "{} roads, {} lines",
         cls.iter().filter(|&&c| c >= 0).count(),
@@ -624,29 +634,6 @@ pub fn build(
 
     let (x, y, w, nid) = (&ways.x, &ways.y, &ways.w, &ways.nid);
     let isroad = |i: usize| cls[w[i] as usize] >= 0;
-
-    // segment lengths (haversine), cumulative over the node rows
-    let mut cum = vec![0f64; n];
-    {
-        let seg: Vec<f64> = (0..n.saturating_sub(1))
-            .into_par_iter()
-            .map(|i| {
-                if w[i + 1] != w[i] {
-                    return 0.0;
-                }
-                let lat0 = (90.0 - y[i] / SCALE).to_radians();
-                let lat1 = (90.0 - y[i + 1] / SCALE).to_radians();
-                let dlat = lat1 - lat0;
-                let dlon = (x[i + 1] / SCALE - 180.0).to_radians() - (x[i] / SCALE - 180.0).to_radians();
-                let h = (dlat / 2.0).sin().powi(2)
-                    + lat0.cos() * lat1.cos() * (dlon / 2.0).sin().powi(2);
-                2.0 * 6371000.0 * h.sqrt().asin() * LEN_FACTOR
-            })
-            .collect();
-        for i in 1..n {
-            cum[i] = cum[i - 1] + seg[i - 1];
-        }
-    }
 
     // nodes shared by more than one road way: there the ways are cut
     let mut rn: Vec<i64> = (0..n).filter(|&i| isroad(i)).map(|i| nid[i]).collect();
@@ -666,26 +653,6 @@ pub fn build(
     drop(rn);
     log(&since(format!("{} shared nodes", shared.len())));
 
-    // ascent and descent (cm) per node row, cumulative
-    let mut cup = vec![0f64; n];
-    let mut cdown = vec![0f64; n];
-    if let Some(hts) = heights {
-        let idx: Vec<usize> = (0..n).filter(|&i| isroad(i)).collect();
-        let hx: Vec<f64> = idx.iter().map(|&i| x[i]).collect();
-        let hy: Vec<f64> = idx.iter().map(|&i| y[i]).collect();
-        let v = hts.at(&hx, &hy);
-        let mut h = vec![0f64; n];
-        for (j, &i) in idx.iter().enumerate() {
-            h[i] = v[j];
-        }
-        for i in 1..n {
-            let d = if w[i] != w[i - 1] { 0.0 } else { h[i] - h[i - 1] };
-            cup[i] = cup[i - 1] + d.max(0.0);
-            cdown[i] = cdown[i - 1] + (-d).max(0.0);
-        }
-        log(&since("heights interpolated".to_string()));
-    }
-
     // edges: consecutive cut points (way ends and shared nodes) of a road way
     let mut cutm = vec![false; n];
     for k in 0..nw {
@@ -698,90 +665,230 @@ pub fn build(
     for i in 0..n {
         cutm[i] = isroad(i) && (cutm[i] || shared.binary_search(&nid[i]).is_ok());
     }
-    let cp: Vec<u32> = (0..n as u32).filter(|&i| cutm[i as usize]).collect();
-    drop(cutm);
+    drop(shared);
+
+    // Length (haversine) and ascent and descent (cm) of every edge.  They are
+    // differences of running sums over all node rows, and the sums are kept at
+    // the cut points only -- per row they cost 24 bytes a node.  The rows go
+    // through in blocks, the segment lengths and heights of a block in
+    // parallel, the sums in row order as before.
+    let seg_in = |i: usize| -> f64 {
+        if w[i] != w[i - 1] {
+            return 0.0;
+        }
+        let lat0 = (90.0 - y[i - 1] / SCALE).to_radians();
+        let lat1 = (90.0 - y[i] / SCALE).to_radians();
+        let dlat = lat1 - lat0;
+        let dlon = (x[i] / SCALE - 180.0).to_radians() - (x[i - 1] / SCALE - 180.0).to_radians();
+        let h = (dlat / 2.0).sin().powi(2) + lat0.cos() * lat1.cos() * (dlon / 2.0).sin().powi(2);
+        2.0 * 6371000.0 * h.sqrt().asin() * LEN_FACTOR
+    };
     let mut ea: Vec<u32> = Vec::new();
     let mut eb: Vec<u32> = Vec::new();
-    for j in 1..cp.len() {
-        if w[cp[j] as usize] == w[cp[j - 1] as usize] {
-            ea.push(cp[j - 1]);
-            eb.push(cp[j]);
+    // (length, ascent, descent) per edge
+    let mut emeas: Vec<(f64, f64, f64)> = Vec::new();
+    {
+        const BLOCK: usize = 1 << 20;
+        let (mut cum, mut up, mut down, mut hprev) = (0f64, 0f64, 0f64, 0f64);
+        // the sums and the row at the last cut point
+        let mut last: Option<(usize, f64, f64, f64)> = None;
+        for s in (0..n).step_by(BLOCK) {
+            let e = (s + BLOCK).min(n);
+            let seg: Vec<f64> =
+                (s..e).into_par_iter().map(|i| if i == 0 { 0.0 } else { seg_in(i) }).collect();
+            let h: Vec<f64> = match &heights {
+                Some(hts) => (s..e)
+                    .into_par_iter()
+                    .map(|i| if isroad(i) { hts.at1(x[i], y[i]) } else { 0.0 })
+                    .collect(),
+                None => Vec::new(),
+            };
+            for i in s..e {
+                cum += seg[i - s];
+                if heights.is_some() {
+                    let hi = h[i - s];
+                    if i > 0 {
+                        let d = if w[i] != w[i - 1] { 0.0 } else { hi - hprev };
+                        up += d.max(0.0);
+                        down += (-d).max(0.0);
+                    }
+                    hprev = hi;
+                }
+                if !cutm[i] {
+                    continue;
+                }
+                if let Some((a, c0, u0, d0)) = last {
+                    if w[a] == w[i] {
+                        ea.push(a as u32);
+                        eb.push(i as u32);
+                        emeas.push((cum - c0, up - u0, down - d0));
+                    }
+                }
+                last = Some((i, cum, up, down));
+            }
         }
     }
-    drop(cp);
+    drop(cutm);
+    if heights.is_some() {
+        log(&since("heights interpolated".to_string()));
+    }
+    // the grid is big (1.3 GB for Great Britain) and not needed any more
+    drop(heights);
     let ne = ea.len();
     let ek: Vec<u32> = ea.iter().map(|&a| w[a as usize]).collect();
-    let routed: Vec<bool> = ek.iter().map(|&k| cls[k as usize] != NOT_ROUTED as i8).collect();
+    let mut routed: Vec<bool> =
+        ek.iter().map(|&k| cls[k as usize] != NOT_ROUTED as i8).collect();
     log(&since(format!("{} edges", ne)));
 
     // graph nodes, numbered per 8x8 cell in (v, u, node id) order from 1
-    let mut ends2: Vec<u32> = Vec::with_capacity(2 * ne);
-    for e in 0..ne {
-        if routed[e] {
-            ends2.push(ea[e]);
-            ends2.push(eb[e]);
-        }
+    struct Graph {
+        ng: usize,
+        gbx: Vec<i64>,
+        gby: Vec<i64>,
+        gu: Vec<u32>,
+        gv: Vec<u32>,
+        o: Vec<u32>,
+        gj: Vec<u32>,
+        bcells: HashSet<(i64, i64)>,
+        kb: HashSet<(i64, i64)>,
+        gkeep: Vec<bool>,
+        eu: Vec<u32>,
+        ev: Vec<u32>,
     }
-    let mut ord: Vec<u32> = (0..ends2.len() as u32).collect();
-    ord.par_sort_by_key(|&j| nid[ends2[j as usize] as usize]);
-    let mut gid: Vec<i64> = Vec::new();
-    let mut pos: Vec<u32> = Vec::new();
-    for &j in &ord {
-        let row = ends2[j as usize];
-        let id = nid[row as usize];
-        if gid.last() != Some(&id) {
-            gid.push(id);
-            pos.push(row);
+    let graph = |routed: &[bool]| -> Result<Graph> {
+        let mut ends2: Vec<u32> = Vec::with_capacity(2 * ne);
+        for e in 0..ne {
+            if routed[e] {
+                ends2.push(ea[e]);
+                ends2.push(eb[e]);
+            }
         }
-    }
-    drop(ord);
-    drop(ends2);
-    let ng = gid.len();
-    let gx: Vec<f64> = pos.iter().map(|&i| x[i as usize] / 2.0).collect();
-    let gy: Vec<f64> = pos.iter().map(|&i| y[i as usize] / 2.0).collect();
-    drop(pos);
-    let gbx: Vec<i64> = gx.iter().map(|v| (v / BCELL).floor() as i64).collect();
-    let gby: Vec<i64> = gy.iter().map(|v| (v / BCELL).floor() as i64).collect();
-    // the original maps a cell onto 0..65535: floor(u * 65535/65536)
-    let gu: Vec<u32> = (0..ng)
-        .map(|i| ((gx[i] - gbx[i] as f64 * BCELL) * (BCELL - 1.0) / BCELL) as u32)
-        .collect();
-    let gv: Vec<u32> = (0..ng)
-        .map(|i| ((gy[i] - gby[i] as f64 * BCELL) * (BCELL - 1.0) / BCELL) as u32)
-        .collect();
-    drop(gx);
-    drop(gy);
-    let mut o: Vec<u32> = (0..ng as u32).collect();
-    o.par_sort_by_key(|&i| {
-        let i = i as usize;
-        (gbx[i], gby[i], gv[i], gu[i], gid[i])
-    });
-    let mut gj = vec![0u32; ng];
-    let mut group = 0usize;
-    for q in 0..ng {
-        let (a, b) = (o[q] as usize, if q > 0 { o[q - 1] as usize } else { 0 });
-        if q > 0 && (gbx[a], gby[a]) != (gbx[b], gby[b]) {
-            group = q;
+        let mut ord: Vec<u32> = (0..ends2.len() as u32).collect();
+        ord.par_sort_by_key(|&j| nid[ends2[j as usize] as usize]);
+        let mut gid: Vec<i64> = Vec::new();
+        let mut pos: Vec<u32> = Vec::new();
+        for &j in &ord {
+            let row = ends2[j as usize];
+            let id = nid[row as usize];
+            if gid.last() != Some(&id) {
+                gid.push(id);
+                pos.push(row);
+            }
         }
-        gj[a] = (q - group + 1) as u32;
-    }
-    let bcells: HashSet<(i64, i64)> = (0..ng).map(|i| (gbx[i], gby[i])).collect();
-    let mut kb: HashSet<(i64, i64)> = HashSet::new();
-    for bc in &bcells {
-        if inside(*bc, 8)? {
-            kb.insert(*bc);
+        drop(ord);
+        drop(ends2);
+        let ng = gid.len();
+        let gx: Vec<f64> = pos.iter().map(|&i| x[i as usize] / 2.0).collect();
+        let gy: Vec<f64> = pos.iter().map(|&i| y[i as usize] / 2.0).collect();
+        drop(pos);
+        let gbx: Vec<i64> = gx.iter().map(|v| (v / BCELL).floor() as i64).collect();
+        let gby: Vec<i64> = gy.iter().map(|v| (v / BCELL).floor() as i64).collect();
+        // the original maps a cell onto 0..65535: floor(u * 65535/65536)
+        let gu: Vec<u32> = (0..ng)
+            .map(|i| ((gx[i] - gbx[i] as f64 * BCELL) * (BCELL - 1.0) / BCELL) as u32)
+            .collect();
+        let gv: Vec<u32> = (0..ng)
+            .map(|i| ((gy[i] - gby[i] as f64 * BCELL) * (BCELL - 1.0) / BCELL) as u32)
+            .collect();
+        drop(gx);
+        drop(gy);
+        let mut o: Vec<u32> = (0..ng as u32).collect();
+        o.par_sort_by_key(|&i| {
+            let i = i as usize;
+            (gbx[i], gby[i], gv[i], gu[i], gid[i])
+        });
+        let mut gj = vec![0u32; ng];
+        let mut group = 0usize;
+        for q in 0..ng {
+            let (a, b) = (o[q] as usize, if q > 0 { o[q - 1] as usize } else { 0 });
+            if q > 0 && (gbx[a], gby[a]) != (gbx[b], gby[b]) {
+                group = q;
+            }
+            gj[a] = (q - group + 1) as u32;
         }
-    }
-    let gkeep: Vec<bool> = (0..ng).map(|i| kb.contains(&(gbx[i], gby[i]))).collect();
-    let mut eu = vec![0u32; ne];
-    let mut ev = vec![0u32; ne];
-    for e in 0..ne {
-        if routed[e] {
-            eu[e] = gid.partition_point(|&v| v < nid[ea[e] as usize]) as u32;
-            ev[e] = gid.partition_point(|&v| v < nid[eb[e] as usize]) as u32;
+        let bcells: HashSet<(i64, i64)> = (0..ng).map(|i| (gbx[i], gby[i])).collect();
+        let mut kb: HashSet<(i64, i64)> = HashSet::new();
+        for bc in &bcells {
+            if inside(*bc, 8)? {
+                kb.insert(*bc);
+            }
         }
-    }
-    drop(gid);
+        let gkeep: Vec<bool> = (0..ng).map(|i| kb.contains(&(gbx[i], gby[i]))).collect();
+        let mut eu = vec![0u32; ne];
+        let mut ev = vec![0u32; ne];
+        for e in 0..ne {
+            if routed[e] {
+                eu[e] = gid.partition_point(|&v| v < nid[ea[e] as usize]) as u32;
+                ev[e] = gid.partition_point(|&v| v < nid[eb[e] as usize]) as u32;
+            }
+        }
+        Ok(Graph { ng, gbx, gby, gu, gv, o, gj, bcells, kb, gkeep, eu, ev })
+    };
+
+    // A B cell takes at most 2^19 edges (a node's first edge has 19 bits) and
+    // 2^18 nodes (an edge's target has 18).  The densest cities go over that
+    // -- 537,759 edges in one cell of the Ruhr -- and there the least needed
+    // ways leave the routing graph, a level at a time and only in the cells
+    // that are full: steps and footways (sidewalks are mapped as footways next
+    // to the road), then service roads, then paths, then tracks.  They are
+    // still drawn; cycleways and roads always stay.
+    let shed = |level: u8, k: usize| -> bool {
+        let c = cls[k];
+        (level >= 1 && (c == 11 || c == 14))
+            || (level >= 2 && c == 7 && cat[k] == 6)
+            || (level >= 3 && c == 13)
+            || (level >= 4 && c == 12)
+    };
+    let mut level: HashMap<(i64, i64), u8> = HashMap::new();
+    let g = loop {
+        let g = graph(&routed)?;
+        let mut load: HashMap<(i64, i64), (usize, usize)> = HashMap::new();
+        for i in 0..g.ng {
+            load.entry((g.gbx[i], g.gby[i])).or_default().1 += 1;
+        }
+        for (e, _) in routed.iter().enumerate().filter(|(_, &r)| r) {
+            for n in [g.eu[e] as usize, g.ev[e] as usize] {
+                load.entry((g.gbx[n], g.gby[n])).or_default().0 += 1;
+            }
+        }
+        let full: Vec<(i64, i64)> = load
+            .iter()
+            .filter(|(_, &(edges, nodes))| edges >= 1 << 19 || nodes >= 1 << 18)
+            .map(|(c, _)| *c)
+            .collect();
+        if full.is_empty() {
+            break g;
+        }
+        for c in full {
+            let l = level.entry(c).or_default();
+            ensure!(
+                *l < 4,
+                "B cell {:?}: {:?} edges and nodes even without footways, service roads, \
+                 paths and tracks",
+                c,
+                load[&c]
+            );
+            *l += 1;
+            log(&format!(
+                "B cell {:?} is full ({} edges, {} nodes): level {} leaves the routing graph",
+                c, load[&c].0, load[&c].1, l
+            ));
+        }
+        for e in 0..ne {
+            if routed[e] {
+                let at = |n: u32| (g.gbx[n as usize], g.gby[n as usize]);
+                let lv = [g.eu[e], g.ev[e]]
+                    .map(|n| level.get(&at(n)).copied().unwrap_or(0))
+                    .into_iter()
+                    .max()
+                    .unwrap_or(0);
+                if shed(lv, ek[e] as usize) {
+                    routed[e] = false;
+                }
+            }
+        }
+    };
+    let Graph { ng, gbx, gby, gu, gv, o, gj, bcells, kb, gkeep, eu, ev } = g;
     log(&since(format!(
         "{} graph nodes in {} B cells, {} kept",
         ng,
@@ -829,7 +936,7 @@ pub fn build(
                 let (a, b) = (ea[e] as usize, eb[e] as usize);
                 let c = cls[k];
                 let dst = (if f { ev[e] } else { eu[e] }) as usize;
-                let ln = ((cum[b] - cum[a]).round_ties_even() as i64).min(0xFFFFF) as u32;
+                let ln = (emeas[e].0.round_ties_even() as i64).min(0xFFFFF) as u32;
                 let (dx, dy) = (gbx[dst] - bc.0, gby[dst] - bc.1);
                 let w0 = ln
                     | (c as u32) << 21
@@ -837,7 +944,7 @@ pub fn build(
                     | ((if f { fwd[k] } else { bwd[k] }) as u32) << 30
                     | 1 << 31;
                 let w3 = ((dx + 64) as u32) << 25 | ((dy + 64) as u32) << 18 | gj[dst];
-                let climb = (if f { cup[b] - cup[a] } else { cdown[b] - cdown[a] })
+                let climb = (if f { emeas[e].1 } else { emeas[e].2 })
                     .round_ties_even() as u32;
                 out.push((vec![w0, fl[k], climb, w3], c, heading(x, y, a, b, f)));
             }
@@ -934,9 +1041,11 @@ pub fn build(
     drop(o);
 
     let empty: Vec<u32> = Vec::new();
-    let mut brec: BTreeMap<(i64, i64), Vec<u8>> = BTreeMap::new();
-    let mut arec: BTreeMap<(i64, i64), Vec<u8>> = BTreeMap::new();
-    let mut drec: BTreeMap<(i64, i64), Vec<u8>> = BTreeMap::new();
+    // the records of a tile are packed as soon as the tile is done, so only the
+    // compressed records of the country stay in memory
+    let mut packed: BTreeMap<(i64, i64), Packed> = BTreeMap::new();
+    let slot = |c: &(i64, i64), g: i64| (c.0.rem_euclid(g) * g + c.1.rem_euclid(g)) as usize;
+    let (mut na, mut nb, mut nd) = (0usize, 0usize, 0usize);
     for (nt, &(tx, ty)) in tlist.iter().enumerate() {
         // B: the routing graph
         let sel = tnodes.get(&(tx, ty)).unwrap_or(&empty);
@@ -948,8 +1057,9 @@ pub fn build(
             }
             cells_b.last_mut().unwrap().1.push(g);
         }
+        let mut brec: Vec<(usize, Vec<u8>)> = Vec::new();
         for (bc, lst) in &cells_b {
-            brec.insert(*bc, b_record(*bc, lst)?);
+            brec.push((slot(bc, 8), b_record(*bc, lst)?));
         }
 
         // D: the road edges and the lines, cut at the cell margin
@@ -960,13 +1070,13 @@ pub fn build(
             let c = cls[k];
             let (a, b) = (ea[e] as usize, eb[e] as usize);
             let pts: Vec<(f64, f64)> = (a..=b).map(|i| (x[i], y[i])).collect();
-            let (s_id, t_id) = if c == NOT_ROUTED as i8 {
+            let (s_id, t_id) = if !routed[e] {
                 (0, 0)
             } else {
                 let at = |g: usize| if gkeep[g] { gj[g] } else { 0 };
                 (at(eu[e] as usize), at(ev[e] as usize))
             };
-            let ln = ((cum[b] - cum[a]).round_ties_even() as i64).min(0xFFFFFF) as u32;
+            let ln = (emeas[e].0.round_ties_even() as i64).min(0xFFFFFF) as u32;
             let w7 = (c as u32) << 27 | ln;
             for (cell, geo) in place(&pts) {
                 cells.entry(cell).or_default().push(DItem::A1 {
@@ -1013,13 +1123,15 @@ pub fn build(
             }
         }
         let mut index: HashMap<(i64, i64), HashMap<String, u32>> = HashMap::new();
+        let mut arec: Vec<(usize, Vec<u8>)> = Vec::new();
         for (ac, ns) in &anames {
             let v: Vec<String> = ns.iter().map(|s| s.to_string()).collect();
             let (raw, ix) = build_a(ac.0, ac.1, &v, cname);
-            arec.insert(*ac, raw);
+            arec.push((slot(ac, 4), raw));
             index.insert(*ac, ix);
         }
 
+        let mut drec: Vec<(usize, Vec<u8>)> = Vec::new();
         for cell in &keep {
             let idx = index.get(&(cell.0.div_euclid(8), cell.1.div_euclid(8)));
             let mut a1: Vec<Item> = Vec::new();
@@ -1032,7 +1144,8 @@ pub fn build(
                         let off = if nm.is_empty() {
                             0xFFFF_FFFF
                         } else {
-                            *idx.and_then(|m| m.get(nm)).expect("name not in the table")
+                            *idx.and_then(|m| m.get(&**nm))
+                                .expect("name not in the table")
                         };
                         a1.push(Item {
                             s: vec![
@@ -1068,7 +1181,19 @@ pub fn build(
             a4.sort_by_key(|it| it.s[2]);
             let arrays = vec![a1, Vec::new(), a3, a4, Vec::new()];
             let hdr = d_header(&arrays);
-            drec.insert(*cell, layers::build_arrays(&ArrayRec { hdr, arrays }, &D_SPEC));
+            drec.push((
+                slot(cell, 32),
+                layers::build_arrays(&ArrayRec { hdr, arrays }, &D_SPEC),
+            ));
+        }
+        (na, nb, nd) = (na + arec.len(), nb + brec.len(), nd + drec.len());
+        if !(arec.is_empty() && brec.is_empty() && drec.is_empty()) {
+            let t = packed
+                .entry((tx, ty))
+                .or_insert_with(|| Packed::new(tx as u16, ty as u16));
+            t.add('A', arec)?;
+            t.add('B', brec)?;
+            t.add('D', drec)?;
         }
         log(&since(format!(
             "  tile {},{} ({}/{}): {} B, {} D records",
@@ -1082,9 +1207,7 @@ pub fn build(
     }
     log(&since(format!(
         "A built: {} records, B built: {} records, D built: {} records",
-        arec.len(),
-        brec.len(),
-        drec.len()
+        na, nb, nd
     )));
 
     // C: the overview lines of the classes 0-3, in 360/2^25 units
@@ -1149,38 +1272,36 @@ pub fn build(
     log(&since(format!("C built: {} records", crec.len())));
 
     // tiles
-    let mut tiles: BTreeMap<(i64, i64), Areas> = BTreeMap::new();
-    for (area, recs, g) in
-        [('A', &arec, 4i64), ('B', &brec, 8), ('C', &crec, 4), ('D', &drec, 32)]
-    {
-        for (&(cx, cy), raw) in recs {
-            let slot = (cx.rem_euclid(g) * g + cy.rem_euclid(g)) as usize;
-            tiles
-                .entry((cx.div_euclid(g), cy.div_euclid(g)))
-                .or_default()
-                .entry(area)
-                .or_default()
-                .insert(slot, raw.clone());
-        }
+    let mut ctiles: BTreeMap<(i64, i64), Vec<(usize, Vec<u8>)>> = BTreeMap::new();
+    for (cell, raw) in crec {
+        ctiles
+            .entry((cell.0.div_euclid(4), cell.1.div_euclid(4)))
+            .or_default()
+            .push((slot(&cell, 4), raw));
+    }
+    for ((tx, ty), recs) in ctiles {
+        packed
+            .entry((tx, ty))
+            .or_insert_with(|| Packed::new(tx as u16, ty as u16))
+            .add('C', recs)?;
     }
     if let Some(c) = orig {
         for (tile, areas) in original_tiles(c)? {
             // west of 0 degrees without a new record: the Faroe Islands
-            if !tiles.contains_key(&tile) && tile.0 < 128 {
-                log(&format!("tile {},{} copied from the original", tile.0, tile.1));
-                tiles.insert(tile, areas);
+            if !packed.contains_key(&tile) && tile.0 < 128 {
+                log(&format!(
+                    "tile {},{} copied from the original",
+                    tile.0, tile.1
+                ));
+                let mut t = Packed::new(tile.0 as u16, tile.1 as u16);
+                for (area, slots) in areas {
+                    t.add(area, slots.into_iter().collect())?;
+                }
+                packed.insert(tile, t);
             }
         }
     }
-    let content: Vec<TileContent> = tiles
-        .into_iter()
-        .map(|((tx, ty), areas)| TileContent {
-            x: tx as u16,
-            y: ty as u16,
-            areas: Some(areas),
-            tail: Vec::new(),
-        })
-        .collect();
+    let content: Vec<Packed> = packed.into_values().collect();
     log(&since(format!("writing {} tiles", content.len())));
     let meta = Meta {
         date: date.to_vec(),
@@ -1189,7 +1310,7 @@ pub fn build(
         country,
         tail_tile: None,
     };
-    writer::write_chart(&meta, &content, sign, None)
+    writer::write_packed(&meta, &content, sign)
 }
 
 /// One item of a D record before the name offsets are known.

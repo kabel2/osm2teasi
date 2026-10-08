@@ -185,20 +185,18 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
     for (_, refs) in &p2.members {
         ids.extend(refs.iter().copied());
     }
-    let mut index = NodeIndex::new(ids);
-    let (nodes, pos) = par_blocks(
+    let index = NodeIndex::new(ids);
+    let nodes = par_blocks(
         path,
-        || (Vec::new(), Vec::new()),
-        |acc: &mut (Vec<Cand>, Vec<(i64, i32, i32)>), block: &PrimitiveBlock| {
+        Vec::new,
+        |acc: &mut Vec<Cand>, block: &PrimitiveBlock| {
             let mut probe = index.probe();
             for group in block.groups() {
                 let mut one = |id: i64, lon: i32, lat: i32, t: &Tags, raw: &dyn Fn() -> TagMap| {
-                    if probe.wants(id) {
-                        acc.1.push((id, lon, lat));
-                    }
+                    probe.set(id, lon, lat);
                     if let Some((poi, seamark)) = fields(t, true, || raw()) {
                         let (x, y) = xy_dm(lon, lat);
-                        acc.0.push(Cand { kind: 'n', id, x, y, centre: None, poi, seamark });
+                        acc.push(Cand { kind: 'n', id, x, y, centre: None, poi, seamark });
                     }
                 };
                 for n in group.nodes() {
@@ -214,14 +212,10 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Vec<Cand>> {
             }
         },
         |mut a, b| {
-            a.0.extend(b.0);
-            a.1.extend(b.1);
+            a.extend(b);
             a
         },
     )?;
-    for (id, lon, lat) in &pos {
-        index.set(*id, *lon, *lat);
-    }
     log(&since(format!(
         "pass 3: {} nodes, {} of {} way nodes located",
         nodes.len(),

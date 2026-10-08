@@ -26,7 +26,7 @@ use crate::chart;
 use crate::geos::Geom;
 use crate::grid::Grid;
 use crate::layers::{self, u16enc, AItem, ARec, ArrayRec, Item, Sub18, Var, D_SPEC, LAYER_TA};
-use crate::osm::{road_class, sort_key, LEN_FACTOR};
+use crate::osm::{sort_key, LEN_FACTOR};
 use crate::pbf::SCALE;
 use crate::ta_index::{self, Cell, Index, Kid, Name, Node, Res, ALL};
 use crate::way::Ways;
@@ -442,20 +442,15 @@ pub fn street_pieces(
     let mut cls = vec![-1i8; nw];
     let mut names: Vec<Option<Box<str>>> = vec![None; nw];
     let mut nnamed = 0;
-    for k in 0..nw {
-        let t = &ways.tags[k];
-        if let Some(c) = road_class(t) {
-            cls[k] = c as i8;
-            if TA_CLASS.iter().any(|&(o, _)| o == c as i8) {
-                if let Some(nm) = t.get("name").filter(|s| !s.is_empty()) {
-                    names[k] = Some(nm.trim().into());
-                    nnamed += 1;
-                }
+    for (k, at) in std::mem::take(&mut ways.attr).into_iter().enumerate() {
+        if at.cls >= 0 {
+            cls[k] = at.cls;
+            if TA_CLASS.iter().any(|&(o, _)| o == at.cls) && !at.name.is_empty() {
+                names[k] = Some(at.name.trim().into());
+                nnamed += 1;
             }
         }
     }
-    ways.tags = Vec::new();
-    ways.rels = HashMap::new();
 
     let (x, y, w, nid) = (&ways.x, &ways.y, &ways.w, &ways.nid);
     // nodes shared by more than one road way
@@ -558,11 +553,11 @@ pub struct Hit {
     pub pc: Option<Box<str>>,
 }
 
-struct Num {
+struct Num<'a> {
     x: f64,
     y: f64,
     n: i64,
-    street: String,
+    street: &'a str,
     city: Option<Box<str>>,
     pc: Option<Box<str>>,
 }
@@ -584,7 +579,7 @@ pub fn match_addresses(
                     x: a.x,
                     y: a.y,
                     n,
-                    street: street.trim().to_string(),
+                    street: street.trim(),
                     city: a.tags.city.as_deref().map(Into::into),
                     pc: pc.as_deref().map(Into::into),
                 });
@@ -592,7 +587,7 @@ pub fn match_addresses(
         }
     }
     for it in interp {
-        let step = match it.kind.as_str() {
+        let step = match &*it.kind {
             "odd" | "even" => 2i64,
             "all" => 1,
             _ => continue,
@@ -625,7 +620,7 @@ pub fn match_addresses(
                         x: ax + f * (bx - ax),
                         y: ay + f * (by - ay),
                         n,
-                        street: street.trim().to_string(),
+                        street: street.trim(),
                         city: None,
                         pc: None,
                     });
@@ -642,32 +637,53 @@ pub fn match_addresses(
         interp.len()
     ));
 
-    // candidate pieces by name and cell, the cell and its eight neighbours
-    let mut by_cell: Ordered<(String, (i64, i64)), Vec<u32>> = Ordered::default();
+    // the pieces by name (casefolded, as a number) and cell; a house number
+    // looks at its own cell and the eight around it
+    let mut ids: HashMap<String, u32> = HashMap::new();
+    let mut id = |s: &str| {
+        let n = ids.len() as u32;
+        *ids.entry(crate::osm::casefold(s)).or_insert(n)
+    };
+    let mut by_cell: HashMap<(u32, (i64, i64)), Vec<u32>> = HashMap::new();
     for (i, p) in pieces.iter().enumerate() {
-        let name = crate::osm::casefold(&p.name);
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                by_cell.entry((name.clone(), (p.cell.0 + dx, p.cell.1 + dy))).push(i as u32);
-            }
-        }
+        by_cell
+            .entry((id(&p.name), p.cell))
+            .or_default()
+            .push(i as u32);
     }
-    let mut groups: Ordered<(String, (i64, i64)), Vec<u32>> = Ordered::default();
+    let mut groups: Ordered<(u32, (i64, i64)), Vec<u32>> = Ordered::default();
     for (j, q) in pts.iter().enumerate() {
-        let cell = ((q.x / CELL as f64).floor() as i64, (q.y / CELL as f64).floor() as i64);
-        groups.entry((crate::osm::casefold(&q.street), cell)).push(j as u32);
+        let cell = (
+            (q.x / CELL as f64).floor() as i64,
+            (q.y / CELL as f64).floor() as i64,
+        );
+        groups.entry((id(q.street), cell)).push(j as u32);
     }
+    drop(ids);
 
     let mut res: Ordered<u32, Vec<Hit>> = Ordered::default();
     let mut matched = 0usize;
-    for (key, js) in &groups.items {
-        let Some(cand) = by_cell.get(key) else { continue };
+    let mut cand: Vec<u32> = Vec::new();
+    for ((name, (cx, cy)), js) in &groups.items {
+        // in piece order, which decides between equally near pieces
+        cand.clear();
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(v) = by_cell.get(&(*name, (cx + dx, cy + dy))) {
+                    cand.extend_from_slice(v);
+                }
+            }
+        }
+        if cand.is_empty() {
+            continue;
+        }
+        cand.sort_unstable();
         // the segments of all candidate pieces, with their offset along the piece
         let mut seg: Vec<(f64, f64, f64, f64)> = Vec::new();
         let mut owner: Vec<u32> = Vec::new();
         let mut before: Vec<f64> = Vec::new();
         let mut total: HashMap<u32, f64> = HashMap::new();
-        for &i in cand {
+        for &i in &cand {
             let p = &pieces[i as usize].pts;
             let mut acc = 0.0;
             for q in 1..p.len() {
@@ -763,7 +779,7 @@ fn assign_places(pieces: &[Piece], hn: &Ordered<u32, Vec<Hit>>, places: &[Place]
             let cand: Vec<Cand> = places
                 .iter()
                 .filter(|p| p.tags.place.as_deref() == Some(typ))
-                .map(|p| (p.x, p.y, p.tags.name.clone().unwrap_or_default().into()))
+                .map(|p| (p.x, p.y, p.tags.name.clone().unwrap_or_default()))
                 .collect();
             if cand.is_empty() {
                 continue;
@@ -809,7 +825,7 @@ fn assign_places(pieces: &[Piece], hn: &Ordered<u32, Vec<Hit>>, places: &[Place]
     let mut by_name: HashMap<Box<str>, Vec<(f64, f64)>> = HashMap::new();
     for p in places {
         if let Some(n) = &p.tags.name {
-            by_name.entry(n.as_str().into()).or_default().push((p.x, p.y));
+            by_name.entry((&**n).into()).or_default().push((p.x, p.y));
         }
     }
     let trees: RefCell<HashMap<Box<str>, Grid>> = RefCell::new(HashMap::new());
@@ -1190,7 +1206,9 @@ enum NKey {
 
 /// Canonical order of the extractor's output, see the module comment.
 fn sort_extract(ad: &mut Extract) {
-    let s = |o: &Option<String>| o.clone().unwrap_or_default();
+    fn s(o: &Option<Box<str>>) -> &str {
+        o.as_deref().unwrap_or("")
+    }
     ad.addr.sort_by(|a, b| {
         (a.x, a.y).partial_cmp(&(b.x, b.y)).unwrap().then_with(|| {
             (
@@ -1233,8 +1251,8 @@ fn sort_extract(ad: &mut Extract) {
 /// one D cell are dropped.
 #[allow(clippy::too_many_arguments)]
 pub fn build(
-    ways: &mut Ways,
-    ad: &mut Extract,
+    mut ways: Ways,
+    mut ad: Extract,
     p: &Geom,
     date: &[u8],
     country: u32,
@@ -1257,25 +1275,29 @@ pub fn build(
         Ok(v)
     };
 
-    let pieces = street_pieces(ways, &inside, &|s| log(&since(s.to_string())))?;
-    sort_extract(ad);
-    let hn = match_addresses(&pieces, &ad.addr, &ad.interp, &|s| log(&since(s.to_string())));
+    // the ways and the addresses are not needed past the matching, and they
+    // are the biggest part of the memory
+    let mut pieces = street_pieces(&mut ways, &inside, &|s| log(&since(s.to_string())))?;
+    drop(ways);
+    sort_extract(&mut ad);
+    let hn = match_addresses(&pieces, &ad.addr, &ad.interp, &|s| {
+        log(&since(s.to_string()))
+    });
     let places: Vec<Place> = ad
         .places
-        .iter()
+        .into_iter()
         .filter(|p| {
             let t = p.tags.place.as_deref().unwrap_or("");
             SETTLEMENT_R.iter().any(|&(k, _)| k == t)
                 || SUBURB_R.iter().any(|&(k, _)| k == t)
                 || OTHER_PLACES.contains(&t)
         })
-        .cloned()
         .collect();
-    let grp = merge_streets(
-        &pieces,
-        assign_places(&pieces, &hn, &places),
-        &|s| log(&since(s.to_string())),
-    );
+    ad.addr = Vec::new();
+    ad.interp = Vec::new();
+    let grp = merge_streets(&pieces, assign_places(&pieces, &hn, &places), &|s| {
+        log(&since(s.to_string()))
+    });
     log(&since("places assigned".to_string()));
 
     // A: the place groups of each 4x4 cell
@@ -1345,7 +1367,7 @@ pub fn build(
         })
     };
     let mut by_cell: Ordered<(i64, i64), Vec<DPiece>> = Ordered::default();
-    for (i, p) in pieces.iter().enumerate() {
+    for (i, p) in pieces.iter_mut().enumerate() {
         let (a, g) = (slots[i].0 as usize, slots[i].1 as usize);
         let off = aindex[a][g][&p.name];
         let (mut left, mut right) = (Vec::new(), Vec::new());
@@ -1358,7 +1380,7 @@ pub fn build(
                 }
             }
         }
-        let last = *p.pts.last().unwrap();
+        let (first, last) = (p.pts[0], *p.pts.last().unwrap());
         let ia = node_id(
             p.na.map(NKey::Node).unwrap_or(NKey::Border(i as u32, 0)),
             p.pts[0].0,
@@ -1374,14 +1396,16 @@ pub fn build(
             ib,
             cls: p.cls,
             len: p.len,
-            pts: p.pts.clone(),
+            // the postcode districts below only need the first point
+            pts: std::mem::replace(&mut p.pts, vec![first]),
         });
     }
     drop(ids);
-    let mut drec: BTreeMap<(i64, i64), Vec<u8>> = BTreeMap::new();
-    for (cell, pcs) in by_cell.items.iter_mut() {
-        drec.insert(*cell, d_record(*cell, pcs));
-    }
+    let drec: BTreeMap<(i64, i64), Vec<u8>> = by_cell
+        .items
+        .into_par_iter()
+        .map(|(cell, mut pcs)| (cell, d_record(cell, &mut pcs)))
+        .collect();
     log(&since(format!("D built: {} records", drec.len())));
 
     // search index: one result per place name and place node
@@ -1422,7 +1446,7 @@ pub fn build(
         .filter_map(|((n, a), _)| a.map(|a| (n.clone(), a)))
         .collect();
     for pl in &places {
-        let name: Box<str> = pl.tags.name.clone().unwrap_or_default().into();
+        let name: Box<str> = pl.tags.name.clone().unwrap_or_default();
         let key = (name.clone(), Anchor::of(pl.x, pl.y));
         if used.contains(&key) {
             continue;
@@ -1500,15 +1524,15 @@ pub fn build(
     log(&since(format!("index {} B", index.len())));
 
     let mut tiles: BTreeMap<(i64, i64), Areas> = BTreeMap::new();
-    for (area, recs, g) in [('A', &arec, 4i64), ('D', &drec, 32)] {
-        for (&(cx, cy), raw) in recs {
+    for (area, recs, g) in [('A', arec, 4i64), ('D', drec, 32)] {
+        for ((cx, cy), raw) in recs {
             let slot = (cx.rem_euclid(g) * g + cy.rem_euclid(g)) as usize;
             tiles
                 .entry((cx.div_euclid(g), cy.div_euclid(g)))
                 .or_default()
                 .entry(area)
                 .or_default()
-                .insert(slot, raw.clone());
+                .insert(slot, raw);
         }
     }
     ensure!(!tiles.is_empty(), "no tile has a record");

@@ -17,8 +17,14 @@
 #   TEASI_DEVICE      serial whose first eight digits pick the record key
 #   TEASI_GEOS        libgeos_c.so, needed by four of the six compilers
 #   LAND              land_polygons.shp (coastlines and the relief's land cover)
-#   MAX_PBF_MB        skip extracts above this, default 2500: the street layer
-#                     needs about seven times the extract's size in memory
+#   MAX_PBF_MB        skip extracts above this; the default is a third of the
+#                     machine's memory.  The peak is about 2.7 times the size of
+#                     a big extract (Germany: 4.9 GB -> 13.3 GB), more for small
+#                     ones, where fixed costs dominate.
+#
+# The region list is generated: `teasi regions > tools/regions.tsv` fetches
+# Geofabrik's index and maps it onto the firmware's country codes (see
+# rust/src/regions.rs for what is left out and why).
 #   DATE              version date of the files, default today
 set -u -o pipefail
 
@@ -27,7 +33,7 @@ want=${2:-}
 here=$(cd "$(dirname "$0")" && pwd)
 teasi=$here/../rust/target/release/teasi
 list=$here/regions.tsv
-max=${MAX_PBF_MB:-2500}
+max=${MAX_PBF_MB:-$(awk '/^MemTotal:/ { print int($2 / 1024 / 3) }' /proc/meminfo)}
 date=${DATE:-$(date +%Y%m%d)}
 land=${LAND:-}
 base=https://download.geofabrik.de

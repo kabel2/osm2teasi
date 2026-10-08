@@ -278,7 +278,7 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
 
     // pass 2: closed ways that are areas, the coastline, and the member ways
     let since = lap();
-    let p2 = par_blocks(
+    let mut p2 = par_blocks(
         path,
         Pass2::default,
         |acc: &mut Pass2, block: &PrimitiveBlock| {
@@ -335,33 +335,8 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
     for (_, refs) in &p2.members {
         ids.extend(refs.iter().copied());
     }
-    let mut index = NodeIndex::new(ids);
-    let pos = par_blocks(
-        path,
-        Vec::new,
-        |acc: &mut Vec<(i64, i32, i32)>, block: &PrimitiveBlock| {
-            let mut probe = index.probe();
-            for group in block.groups() {
-                for n in group.nodes() {
-                    if probe.wants(n.id()) {
-                        acc.push((n.id(), n.decimicro_lon(), n.decimicro_lat()));
-                    }
-                }
-                for n in group.dense_nodes() {
-                    if probe.wants(n.id()) {
-                        acc.push((n.id(), n.decimicro_lon(), n.decimicro_lat()));
-                    }
-                }
-            }
-        },
-        |mut a, b| {
-            a.extend(b);
-            a
-        },
-    )?;
-    for (id, lon, lat) in &pos {
-        index.set(*id, *lon, *lat);
-    }
+    let index = NodeIndex::new(ids);
+    index.fill(path)?;
     log(&since(format!(
         "pass 3: {} of {} way nodes located",
         index.len() - index.missing(),
@@ -371,11 +346,12 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
     // geometry: closed ways are one ring, relations are assembled
     let since = lap();
     let mut out = Extract::default();
-    for w in &p2.ways {
+    // taken over one by one, so the node lists go as the rings come
+    for w in std::mem::take(&mut p2.ways) {
         let Some(dm) = locs(&w.refs, &index) else { continue };
         let Some(polys) = rings_of(&[dm]) else { continue };
         if !polys.is_empty() {
-            out.areas.push(Area { id: 2 * w.id, tags: w.tags.clone(), polys });
+            out.areas.push(Area { id: 2 * w.id, tags: w.tags, polys });
         }
     }
     let n_ways = out.areas.len();

@@ -332,8 +332,18 @@ It needs libgeos, see [../rust/README.md](../rust/README.md). The steps in `osm.
    nodes in omitted B cells drop out of the graph and their ids in D become 0. The Faroese
    tiles (west of 0°) are taken unchanged from the original (only with an original).
 7. **Memory:** the edges, the graph nodes and their numbering per B cell are computed for
-   the whole country at once, the B, D and A records afterwards **tile by tile**. Great
-   Britain needs 16 GB for that and takes 4:13 from the PBF to the file.
+   the whole country at once, the B, D and A records afterwards **tile by tile**, and each
+   tile is compressed as soon as it is done. Length, ascent and descent are kept per edge
+   (differences of running sums over the node rows, so the values are those of the
+   per-node sums). Great Britain needs 6.4 GB and 2:45 from the PBF to the file, Germany
+   12.2 GB and 8:20.
+8. **Full B cells:** a B cell takes fewer than 2¹⁹ edges (a node's first edge has 19 bits)
+   and 2¹⁸ nodes (an edge's target has 18). Central Berlin has 745,713 edges and 275,297
+   nodes in one cell. In such a cell the least needed ways leave the routing graph, a level
+   at a time until it fits: steps and footways (sidewalks are mapped as footways beside the
+   road), then `highway=service`, then paths and bridleways, then tracks. They stay in D
+   with node ids 0, like the motorways. For Germany the first level is enough, in two
+   cells; Denmark and Great Britain have no full cell.
 
 **The ascents** come from the **Copernicus DEM GLO-90** (`teasi dem`: tiles from the public
 AWS bucket `copernicus-dem-90m`, resampled onto a 3″ grid, Gaussian smoothing σ = 1 grid
@@ -350,7 +360,7 @@ CHART_FILES.md 1), `--name=<country>` (the country name in the A record).
 teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin    # 234 tiles, 3.6 s cached
 teasi osm --heights=build/gb/dem.bin --country=17 "--name=United Kingdom" \
     osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly - \
-    build/gb/GreatBritain_osm.v20260918 20260918       # 4:13, 16.0 GB
+    build/gb/GreatBritain_osm.v20260918 20260918       # 2:45, 6.4 GB
 ```
 
 `way.rs` keeps only the ways that `road_class` or `line_type` accepts and stores the node

@@ -147,7 +147,7 @@ fn teasi_units_match_python() {
 
 #[test]
 fn node_index_keeps_what_it_was_asked_for() {
-    let mut ix = teasi::pbf::NodeIndex::new(vec![7, 3, 7, 1]);
+    let ix = teasi::pbf::NodeIndex::new(vec![7, 3, 7, 1]);
     assert_eq!(ix.len(), 3);
     assert!(ix.wants(3) && !ix.wants(4));
     assert_eq!(ix.missing(), 3);
@@ -1071,4 +1071,41 @@ fn signing_a_file_without_records_fails() {
     assert!(s.mac(&[0u8; 120]).is_err());
     assert!(s.mac(&[0u8; 0x843]).is_err());
     assert!(s.mac(&[0u8; 0x844]).is_ok());
+}
+
+#[test]
+fn regions_split_countries_the_firmware_knows_by_part() {
+    let f = |id: &str, name: &str, parent: &str, path: &str| {
+        format!(
+            r#"{{"properties":{{"id":"{}","name":"{}","parent":"{}","urls":{{"pbf":"https://download.geofabrik.de/{}-latest.osm.pbf"}}}}}}"#,
+            id, name, parent, path
+        )
+    };
+    let feats = [
+        f("canada", "Canada", "north-america", "north-america/canada"),
+        f("yukon", "Yukon", "canada", "north-america/canada/yukon"),
+        f("quebec", "Quebec", "canada", "north-america/canada/quebec"),
+        f("us", "United States of America", "north-america", "north-america/us"),
+        f("us/georgia", "Georgia", "north-america", "north-america/us/georgia"),
+        f("georgia", "Georgia", "europe", "europe/georgia"),
+        f("gcc-states", "GCC States", "asia", "asia/gcc-states"),
+        f("bayern", "Bayern", "germany", "europe/germany/bayern"),
+    ];
+    let json = format!(r#"{{"features":[{}]}}"#, feats.join(","));
+    let got: Vec<(String, u32)> = teasi::regions::regions(&json)
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.path, r.code))
+        .collect();
+    let code = |s: &str| teasi::chart::country(s).unwrap().0;
+    assert_eq!(
+        got,
+        vec![
+            ("asia/gcc-states".to_string(), code("Saudi Arabia")),
+            ("europe/georgia".to_string(), code("Georgia")),
+            ("north-america/canada/quebec".to_string(), code("Québec (Canada)")),
+            ("north-america/canada/yukon".to_string(), code("Yukon Territory (Canada)")),
+            ("north-america/us/georgia".to_string(), code("Georgia (United States)")),
+        ]
+    );
 }

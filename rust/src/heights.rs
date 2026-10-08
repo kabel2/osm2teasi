@@ -82,21 +82,21 @@ impl Heights {
     /// Heights in cm at the given points (360/2^28 units), bilinear and clipped
     /// to the grid.
     pub fn at(&self, px: &[f64], py: &[f64]) -> Vec<f64> {
+        px.par_iter().zip(py).map(|(&x, &y)| self.at1(x, y)).collect()
+    }
+
+    /// One point of [`Heights::at`].
+    pub fn at1(&self, x: f64, y: f64) -> f64 {
         let Heights { rows, cols, lon0, lat0, step, z } = self;
-        px.par_iter()
-            .zip(py)
-            .map(|(&x, &y)| {
-                let c = ((x / SCALE - 180.0) - lon0) / step;
-                let r = (lat0 - (90.0 - y / SCALE)) / step;
-                let c = c.clamp(0.0, *cols as f64 - 1.001);
-                let r = r.clamp(0.0, *rows as f64 - 1.001);
-                let (c0, r0) = (c as usize, r as usize);
-                let (fc, fr) = (c - c0 as f64, r - r0 as f64);
-                let at = |r: usize, c: usize| f64::from(z[r * cols + c]);
-                let v = (at(r0, c0) * (1.0 - fc) + at(r0, c0 + 1) * fc) * (1.0 - fr)
-                    + (at(r0 + 1, c0) * (1.0 - fc) + at(r0 + 1, c0 + 1) * fc) * fr;
-                100.0 * v
-            })
-            .collect()
+        let c = ((x / SCALE - 180.0) - lon0) / step;
+        let r = (lat0 - (90.0 - y / SCALE)) / step;
+        let c = c.clamp(0.0, *cols as f64 - 1.001);
+        let r = r.clamp(0.0, *rows as f64 - 1.001);
+        let (c0, r0) = (c as usize, r as usize);
+        let (fc, fr) = (c - c0 as f64, r - r0 as f64);
+        let at = |r: usize, c: usize| f64::from(z[r * cols + c]);
+        let v = (at(r0, c0) * (1.0 - fc) + at(r0, c0 + 1) * fc) * (1.0 - fr)
+            + (at(r0 + 1, c0) * (1.0 - fc) + at(r0 + 1, c0 + 1) * fc) * fr;
+        100.0 * v
     }
 }

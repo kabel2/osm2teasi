@@ -60,6 +60,60 @@ fn pack_record(raw: &[u8], rk: &[u8], plain: bool) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// A tile whose records are compressed and encrypted already, so that a
+/// compiler can hand them over tile by tile instead of holding the plaintext
+/// of the whole country until the end.
+pub struct Packed {
+    pub x: u16,
+    pub y: u16,
+    rk: Vec<u8>,
+    /// area -> slot -> record as it goes into the file (8-byte header first)
+    recs: BTreeMap<char, BTreeMap<usize, Vec<u8>>>,
+    pub tail: Vec<u8>,
+}
+
+impl Packed {
+    /// An empty tile with a fresh record key.
+    pub fn new(x: u16, y: u16) -> Packed {
+        Packed {
+            x,
+            y,
+            rk: urandom(32),
+            recs: BTreeMap::new(),
+            tail: Vec::new(),
+        }
+    }
+
+    /// Compress and encrypt plaintext records into the tile, in parallel.
+    pub fn add(&mut self, area: char, recs: Vec<(usize, Vec<u8>)>) -> Result<()> {
+        let rk = &self.rk;
+        let packed: Vec<(usize, Vec<u8>)> = recs
+            .into_par_iter()
+            .map(|(slot, raw)| Ok((slot, pack_record(&raw, rk, is_plain(area))?)))
+            .collect::<Result<_>>()?;
+        self.recs.entry(area).or_default().extend(packed);
+        Ok(())
+    }
+
+    fn of(areas: &Areas, rk: Vec<u8>, x: u16, y: u16) -> Result<Packed> {
+        let mut recs: BTreeMap<char, BTreeMap<usize, Vec<u8>>> = BTreeMap::new();
+        for (&area, slots) in areas {
+            for (&slot, raw) in slots {
+                recs.entry(area)
+                    .or_default()
+                    .insert(slot, pack_record(raw, &rk, is_plain(area))?);
+            }
+        }
+        Ok(Packed {
+            x,
+            y,
+            rk,
+            recs,
+            tail: Vec::new(),
+        })
+    }
+}
+
 struct Built {
     bytes: Vec<u8>,
     maxlen: usize,
@@ -67,7 +121,8 @@ struct Built {
 }
 
 /// Records are written area by area (A, B, C, D) in slot order, as in the originals.
-fn build_tile(areas: &Areas, rk: &[u8], key: &[u8], tail: &[u8]) -> Result<Built> {
+fn build_tile(t: &Packed, key: &[u8], tail: &[u8]) -> Result<Built> {
+    let rk = &t.rk;
     let mut heads: BTreeMap<char, Vec<u32>> = AREAS
         .iter()
         .map(|&(a, _, g)| (a, vec![0xFFFF_FFFFu32; g * g]))
@@ -76,14 +131,16 @@ fn build_tile(areas: &Areas, rk: &[u8], key: &[u8], tail: &[u8]) -> Result<Built
     let mut maxlen = 0usize;
     let mut maxraw: BTreeMap<char, usize> = BTreeMap::new();
     for &(area, _, _) in AREAS.iter() {
-        let Some(slots) = areas.get(&area) else { continue };
-        for (&slot, raw) in slots {
-            let rec = pack_record(raw, rk, is_plain(area))?;
+        let Some(slots) = t.recs.get(&area) else {
+            continue;
+        };
+        for (&slot, rec) in slots {
             heads.get_mut(&area).unwrap()[slot] = (HEAD + body.len()) as u32;
             maxlen = maxlen.max(rec.len() - 8);
+            let raw = u32::from_le_bytes(rec[4..8].try_into().unwrap()) as usize;
             let e = maxraw.entry(area).or_default();
-            *e = (*e).max(raw.len());
-            body.extend_from_slice(&rec);
+            *e = (*e).max(raw);
+            body.extend_from_slice(rec);
         }
     }
     let mut head: Vec<u8> = Vec::with_capacity(HEAD);
@@ -110,18 +167,49 @@ pub fn write_chart(
     sign: &chart::Signer,
     rk: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    let key = sign.key();
-    let n = tiles.len();
-    let jobs: Vec<&TileContent> = tiles.iter().filter(|t| t.areas.is_some()).collect();
-    let keys: Vec<Vec<u8>> = jobs
+    let keys: Vec<Vec<u8>> = tiles
         .iter()
         .map(|_| rk.map(|r| r.to_vec()).unwrap_or_else(|| urandom(32)))
         .collect();
-    let built: Vec<Built> = jobs
+    let packed: Vec<Option<Packed>> = tiles
         .par_iter()
-        .zip(keys.par_iter())
-        .map(|(t, k)| build_tile(t.areas.as_ref().unwrap(), k, &key, &t.tail))
-        .collect::<Result<Vec<_>>>()?;
+        .zip(keys.into_par_iter())
+        .map(|(t, k)| {
+            t.areas
+                .as_ref()
+                .map(|a| Packed::of(a, k, t.x, t.y))
+                .transpose()
+        })
+        .collect::<Result<_>>()?;
+    let list: Vec<(u16, u16, Option<&Packed>, &[u8])> = tiles
+        .iter()
+        .zip(&packed)
+        .map(|(t, p)| (t.x, t.y, p.as_ref(), &t.tail[..]))
+        .collect();
+    assemble(meta, &list, sign)
+}
+
+/// [`write_chart`] for tiles packed by the compiler, in directory order.
+pub fn write_packed(meta: &Meta, tiles: &[Packed], sign: &chart::Signer) -> Result<Vec<u8>> {
+    let list: Vec<(u16, u16, Option<&Packed>, &[u8])> = tiles
+        .iter()
+        .map(|t| (t.x, t.y, Some(t), &t.tail[..]))
+        .collect();
+    assemble(meta, &list, sign)
+}
+
+/// The file from its tiles: (x, y, records or an empty placeholder, tail).
+fn assemble(
+    meta: &Meta,
+    tiles: &[(u16, u16, Option<&Packed>, &[u8])],
+    sign: &chart::Signer,
+) -> Result<Vec<u8>> {
+    let key = sign.key();
+    let n = tiles.len();
+    let built: Vec<Option<Built>> = tiles
+        .par_iter()
+        .map(|(_, _, p, tail)| p.map(|p| build_tile(p, &key, tail)).transpose())
+        .collect::<Result<_>>()?;
 
     let mut off = 0x78 + 8 * n;
     let mut dir: Vec<(u16, u16, usize)> = Vec::with_capacity(n);
@@ -129,17 +217,15 @@ pub fn write_chart(
     let mut maxlen = 0usize;
     let mut maxraw: BTreeMap<char, usize> = BTreeMap::new();
     let mut extra = 0xFFFF_FFFFu32;
-    let mut it = built.iter();
-    for t in tiles {
-        if t.areas.is_none() {
-            dir.push((t.x, t.y, off));
+    for (&(x, y, _, tail), b) in tiles.iter().zip(&built) {
+        let Some(b) = b else {
+            dir.push((x, y, off));
             continue;
+        };
+        if meta.tail_tile == Some((x, y)) {
+            extra = (off + b.bytes.len() - tail.len()) as u32;
         }
-        let b = it.next().unwrap();
-        if meta.tail_tile == Some((t.x, t.y)) {
-            extra = (off + b.bytes.len() - t.tail.len()) as u32;
-        }
-        dir.push((t.x, t.y, off));
+        dir.push((x, y, off));
         blobs.push(&b.bytes);
         off += b.bytes.len();
         maxlen = maxlen.max(b.maxlen);

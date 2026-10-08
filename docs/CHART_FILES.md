@@ -526,10 +526,27 @@ details are in the layer documents.
 |---|---|---:|---:|
 | DEM grid | `teasi dem osm_ref/great-britain.poly osm_ref/dem build/gb/dem.bin` | 3.6 s | 3.3 GB |
 | POIs | `teasi osmpoi … --country=17` / `teasi osmpoint …` | 35 + 17 s | 0.9 GB |
-| Areas | `teasi osmarea … - --country=17 --land=…` | 3:10 | 7.1 GB |
-| Streets | `teasi osm --heights=… --country=17 "--name=United Kingdom" … -` | 4:13 | 16.0 GB |
-| Addresses | `teasi ta --country=17 "--name=United Kingdom" …` | 3:19 | 13.7 GB |
+| Areas | `teasi osmarea … - --country=17 --land=…` | 3:13 | 6.3 GB |
+| Streets | `teasi osm --heights=… --country=17 "--name=United Kingdom" … -` | 2:45 | 6.4 GB |
+| Addresses | `teasi ta --country=17 "--name=United Kingdom" …` | 2:24 | 4.7 GB |
 | Terrain | `teasi terrain --country=17 --land=… --area=… …` | 1:24 | 7.9 GB |
+
+The times and peaks for areas, streets and addresses are those of 2026-10-08; until then
+the streets needed 16.0 GB and the addresses 13.7 GB (see "Memory" below). Germany, from
+the 4.9 GB extract, peaks at 13.3 GB (areas), 12.2 GB (streets), 11.0 GB (addresses) and
+9.3 GB (terrain) and takes about 35 minutes for all six layers.
+
+**Memory** is the peak of the most expensive layer, as `teasi all` builds them one after
+the other. What brought Great Britain's streets from 16 GB down to 6.4 GB, with every
+record unchanged: the ways keep the few attributes the compilers read instead of all their
+tags (`way.rs`), the node index is filled in place by the threads reading the file
+(`pbf.rs`), each LZMA encoder gets a dictionary the size of its record instead of 16 MiB
+(190 MB of encoder per thread), the street layer compresses a tile's records as soon as
+the tile is done (`writer::Packed`) and keeps length, ascent and descent per edge instead
+of running sums per node, and the binary uses mimalloc, which hands freed memory back
+where glibc keeps it in its per-thread arenas. Two files changed by a few bytes (ta −4 of
+114 MB, osm +72 of 531 MB): the smaller dictionaries compress some records slightly
+differently; the decompressed records are identical.
 
 The result: osm 531 MB (12.1 M graph nodes, 30 M edges, 57 % with an ascent, 33 % of the
 nodes with left turns), osmarea 83 MB, osmpoi 17 MB (750,000 POIs), osmpoint 0.5 MB (12,561
@@ -559,7 +576,7 @@ OK too (2026-09-19).
 the search only finds places and streets near the current position.
 ```bash
 teasi ta --country=17 "--name=United Kingdom" osm_ref/great-britain-latest.osm.pbf \
-    osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919    # 3:19, 13.7 GB
+    osm_ref/great-britain.poly build/gb/GreatBritain_ta.v20260919 20260919    # 2:24, 4.7 GB
 ```
 114 MB. House numbers only exist where OSM has addresses (5 of about 30 M). The details and
 the checks are in [TA_FORMAT.md](TA_FORMAT.md). **Tested on the device (2026-10-07):**

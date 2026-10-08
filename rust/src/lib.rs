@@ -20,6 +20,7 @@ pub mod pc1;
 pub mod poi;
 pub mod poly;
 pub mod raster;
+pub mod regions;
 pub mod ta;
 pub mod ta_index;
 pub mod terrain;

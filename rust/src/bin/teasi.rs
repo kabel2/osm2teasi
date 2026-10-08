@@ -1,5 +1,15 @@
 //! Command line front end.  See the subcommand list in `usage`.
 
+// mimalloc instead of glibc's malloc: glibc keeps the memory a phase frees
+// scattered over its per-thread arenas, and the peak is what decides whether
+// a country fits (Great Britain's address search: 4.9 GB against 7.0)
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// `mi_option_purge_delay` (mimalloc.h): hand freed memory back at once
+/// instead of after 10 ms, which is what keeps the peak down.
+const MI_OPTION_PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
+
 use std::io::Write;
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -54,6 +64,9 @@ usage: teasi <command> [arguments]
                              --original=<chart> an original file of that
                              country, which supplies the sea outside the
                              boundary and any tiles the extract does not cover
+  regions [index-v1.json]    Geofabrik's regions with their country codes, the
+                             list tools/build_world.sh works through (fetches
+                             the index when no file is given)
   dem <area.poly> <tile dir> <out.bin>
                              download the Copernicus DEM GLO-90 for that area
                              and write the elevation grid --heights= reads
@@ -357,8 +370,9 @@ fn index(path: &str) -> Result<bool> {
 }
 
 /// Clean a tag value for the canonical dump (both sides do the same).
-fn flat(s: Option<&String>) -> String {
-    s.map(|v| v.replace(['\t', '\n', '\r'], " ")).unwrap_or_default()
+fn flat<S: AsRef<str>>(s: Option<&S>) -> String {
+    s.map(|v| v.as_ref().replace(['\t', '\n', '\r'], " "))
+        .unwrap_or_default()
 }
 
 fn bits(v: f64) -> String {
@@ -580,10 +594,10 @@ fn land(shp: &str, area: &str) -> Result<()> {
 
 /// Canonical dump of the way extractor: one line per way, nodes hashed.
 fn ways(path: &str, dst: &str) -> Result<()> {
-    let w = teasi::way::extract(path, &|s| println!("  {}", s))?;
+    let w = teasi::way::extract(path, &|_| true, &|s| println!("  {}", s))?;
     let mut out = std::io::BufWriter::new(std::fs::File::create(dst)?);
     for k in 0..w.ids.len() {
-        let t = &w.tags[k];
+        let a = &w.attr[k];
         let rows = w.nodes(k);
         let mut h = Md5::new();
         for i in rows.clone() {
@@ -592,14 +606,11 @@ fn ways(path: &str, dst: &str) -> Result<()> {
             h.update(w.y[i].to_bits().to_le_bytes());
         }
         let md5 = format!("{:x}", h.finalize())[..8].to_string();
-        let rels = w.rels.get(&w.ids[k]).map_or(&[][..], |v| &v[..]);
-        let (kind, ty, name) = match teasi::osm::road_class(t) {
-            Some(c) => ("r", c, t.get("name").unwrap_or("").to_string()),
-            None => match teasi::osm::line_type(t) {
-                Some(teasi::osm::LineType::A3(ty)) => ("3", ty, String::new()),
-                Some(teasi::osm::LineType::A4(ty, nm)) => ("4", ty, nm),
-                None => ("-", 0, String::new()),
-            },
+        let (kind, ty, name) = match &a.line {
+            _ if a.cls >= 0 => ("r", a.cls as u32, a.name.to_string()),
+            Some(teasi::osm::LineType::A3(ty)) => ("3", *ty, String::new()),
+            Some(teasi::osm::LineType::A4(ty, nm)) => ("4", *ty, nm.clone()),
+            None => ("-", 0, String::new()),
         };
         writeln!(
             out,
@@ -607,7 +618,7 @@ fn ways(path: &str, dst: &str) -> Result<()> {
             w.ids[k],
             kind,
             ty,
-            teasi::osm::flags(t, rels),
+            a.flags,
             rows.len(),
             md5,
             name
@@ -643,8 +654,12 @@ fn compile_osm(
         }
         None => None,
     };
-    let mut w = teasi::way::extract(src, &|s| println!("  {}", s))?;
-    let original = if orig == "-" { None } else { Some(Chart::open(orig)?) };
+    let mut w = teasi::way::extract(src, &|_| true, &|s| println!("  {}", s))?;
+    let original = if orig == "-" {
+        None
+    } else {
+        Some(Chart::open(orig)?)
+    };
     let rings = teasi::poly::load(area)?;
     let p = teasi::osmarea::boundary_at(&rings, 1.0)?;
     let d = teasi::osm::build(
@@ -652,7 +667,7 @@ fn compile_osm(
         &p,
         original.as_ref(),
         date.as_bytes(),
-        hts.as_ref(),
+        hts,
         country,
         name,
         sign,
@@ -676,20 +691,12 @@ fn compile_ta(args: &[String], country: u32, name: &str, sign: &chart::Signer) -
     let t0 = std::time::Instant::now();
     println!("  libgeos {}", teasi::geos::version()?);
     let log = |s: &str| println!("  {}", s);
-    let mut ad = teasi::addr::extract(src, &log)?;
-    let mut w = teasi::way::extract(src, &log)?;
+    let ad = teasi::addr::extract(src, &log)?;
+    // the address search only needs the roads, the lines would be dead weight
+    let w = teasi::way::extract(src, &|a| a.cls >= 0, &log)?;
     let rings = teasi::poly::load(area)?;
     let p = teasi::osmarea::boundary_at(&rings, 1.0)?;
-    let d = teasi::ta::build(
-        &mut w,
-        &mut ad,
-        &p,
-        date.as_bytes(),
-        country,
-        name,
-        sign,
-        &log,
-    )?;
+    let d = teasi::ta::build(w, ad, &p, date.as_bytes(), country, name, sign, &log)?;
     std::fs::write(dst, &d)?;
     println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
     Ok(true)
@@ -992,6 +999,19 @@ fn run() -> Result<bool> {
             dump(&args[1], &args[2])?;
             Ok(true)
         }
+        "regions" => {
+            let json = match args.get(1) {
+                Some(p) => std::fs::read_to_string(p)?,
+                None => ureq::get(teasi::regions::INDEX)
+                    .call()?
+                    .body_mut()
+                    .with_config()
+                    .limit(64 << 20)
+                    .read_to_string()?,
+            };
+            print!("{}", teasi::regions::tsv(&teasi::regions::regions(&json)?));
+            Ok(true)
+        }
         "md5s" => {
             md5s(&args[1])?;
             Ok(true)
@@ -1130,6 +1150,8 @@ fn run() -> Result<bool> {
 }
 
 fn main() -> ExitCode {
+    // SAFETY: sets an option value; no memory is handed over
+    unsafe { libmimalloc_sys::mi_option_set(MI_OPTION_PURGE_DELAY, 0) };
     match run() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,

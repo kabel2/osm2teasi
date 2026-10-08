@@ -6,6 +6,8 @@
 //! divided by 1e7 -- so the Teasi units come out bit-identical to the Python
 //! extractors.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::{Context, Result};
 use osmpbf::{BlobDecode, BlobReader, PrimitiveBlock};
 use rayon::prelude::*;
@@ -63,19 +65,28 @@ where
 
 /// Node id -> coordinates, for the ids an earlier pass asked for.
 ///
-/// Sorted ids plus a parallel array of decimicrodegrees: 16 bytes per node,
-/// where the Python side keeps a libosmium index of every node in the file.
+/// Sorted ids plus a parallel array of decimicrodegrees: 16 bytes per node.
+/// The locations are atomics so that the threads reading the file store them
+/// right where they belong, instead of collecting them in a list first, which
+/// cost another 16 bytes per node.
 pub struct NodeIndex {
     ids: Vec<i64>,
-    pos: Vec<(i32, i32)>,
+    pos: Vec<AtomicU64>,
+}
+
+const MISSING: u64 = pack_dm(i32::MIN, i32::MIN);
+
+const fn pack_dm(lon: i32, lat: i32) -> u64 {
+    (lon as u32 as u64) << 32 | lat as u32 as u64
 }
 
 impl NodeIndex {
     /// `ids` may contain duplicates and need not be sorted.
     pub fn new(mut ids: Vec<i64>) -> Self {
-        ids.sort_unstable();
+        ids.par_sort_unstable();
         ids.dedup();
-        let pos = vec![(i32::MIN, i32::MIN); ids.len()];
+        ids.shrink_to_fit();
+        let pos = (0..ids.len()).map(|_| AtomicU64::new(MISSING)).collect();
         NodeIndex { ids, pos }
     }
 
@@ -93,69 +104,61 @@ impl NodeIndex {
 
     /// Cursor for one block of nodes; see [`Probe`].
     pub fn probe(&self) -> Probe<'_> {
-        Probe { ids: &self.ids, max: self.ids.last().copied().unwrap_or(i64::MIN), at: 0 }
+        Probe {
+            index: self,
+            max: self.ids.last().copied().unwrap_or(i64::MIN),
+            at: 0,
+        }
     }
 
-    pub fn set(&mut self, id: i64, dm_lon: i32, dm_lat: i32) {
+    /// Store the location of `id`; ids the index was not asked for are ignored.
+    pub fn set(&self, id: i64, dm_lon: i32, dm_lat: i32) {
         if let Ok(i) = self.ids.binary_search(&id) {
-            self.pos[i] = (dm_lon, dm_lat);
+            self.pos[i].store(pack_dm(dm_lon, dm_lat), Ordering::Relaxed);
         }
+    }
+
+    fn at(&self, i: usize) -> Option<(i32, i32)> {
+        let v = self.pos[i].load(Ordering::Relaxed);
+        (v != MISSING).then_some(((v >> 32) as u32 as i32, v as u32 as i32))
     }
 
     /// Teasi units, or None if the file does not contain that node.
     pub fn get(&self, id: i64) -> Option<(f64, f64)> {
-        let i = self.ids.binary_search(&id).ok()?;
-        let (lon, lat) = self.pos[i];
-        if lon == i32::MIN && lat == i32::MIN {
-            return None;
-        }
+        let (lon, lat) = self.get_dm(id)?;
         Some(xy_dm(lon, lat))
     }
 
     /// Decimicrodegrees as the file stores them; libosmium compares locations
     /// in these integers, so ring normalisation needs them unconverted.
     pub fn get_dm(&self, id: i64) -> Option<(i32, i32)> {
-        let i = self.ids.binary_search(&id).ok()?;
-        let p = self.pos[i];
-        if p == (i32::MIN, i32::MIN) {
-            return None;
-        }
-        Some(p)
+        self.at(self.ids.binary_search(&id).ok()?)
     }
 
     pub fn missing(&self) -> usize {
-        self.pos.iter().filter(|p| **p == (i32::MIN, i32::MIN)).count()
+        (0..self.pos.len())
+            .filter(|&i| self.at(i).is_none())
+            .count()
     }
 
     /// Fill the index from the file (one pass over all nodes).
-    pub fn fill(&mut self, path: &str) -> Result<()> {
-        let found = par_blocks(
+    pub fn fill(&self, path: &str) -> Result<()> {
+        par_blocks(
             path,
-            Vec::new,
-            |acc: &mut Vec<(i64, i32, i32)>, block| {
+            || (),
+            |_, block| {
                 let mut probe = self.probe();
                 for group in block.groups() {
                     for n in group.nodes() {
-                        if probe.wants(n.id()) {
-                            acc.push((n.id(), n.decimicro_lon(), n.decimicro_lat()));
-                        }
+                        probe.set(n.id(), n.decimicro_lon(), n.decimicro_lat());
                     }
                     for n in group.dense_nodes() {
-                        if probe.wants(n.id()) {
-                            acc.push((n.id(), n.decimicro_lon(), n.decimicro_lat()));
-                        }
+                        probe.set(n.id(), n.decimicro_lon(), n.decimicro_lat());
                     }
                 }
             },
-            |mut a, b| {
-                a.extend(b);
-                a
-            },
-        )?;
-        for (id, lon, lat) in found {
-            self.set(id, lon, lat);
-        }
-        Ok(())
+            |_, _| (),
+        )
     }
 }
 
@@ -169,30 +172,42 @@ impl NodeIndex {
 /// big the index is.  Out-of-order ids still work, they just cost a binary
 /// search.
 pub struct Probe<'a> {
-    ids: &'a [i64],
+    index: &'a NodeIndex,
     max: i64,
     at: usize,
 }
 
 impl Probe<'_> {
     pub fn wants(&mut self, id: i64) -> bool {
-        if id > self.max {
-            return false;
+        self.find(id).is_some()
+    }
+
+    /// Store the location of `id` if the index wants it.
+    pub fn set(&mut self, id: i64, dm_lon: i32, dm_lat: i32) {
+        if let Some(i) = self.find(id) {
+            self.index.pos[i].store(pack_dm(dm_lon, dm_lat), Ordering::Relaxed);
         }
-        match self.ids.get(self.at) {
-            Some(&cur) if cur == id => return true,
+    }
+
+    fn find(&mut self, id: i64) -> Option<usize> {
+        let ids = &self.index.ids;
+        if id > self.max {
+            return None;
+        }
+        match ids.get(self.at) {
+            Some(&cur) if cur == id => return Some(self.at),
             Some(&cur) if cur < id => {
                 // gallop forward, then search the window we jumped over
                 let mut step = 1;
-                while self.ids.get(self.at + step).is_some_and(|&x| x < id) {
+                while ids.get(self.at + step).is_some_and(|&x| x < id) {
                     step *= 2;
                 }
-                let hi = (self.at + step + 1).min(self.ids.len());
-                self.at += self.ids[self.at..hi].partition_point(|&x| x < id);
+                let hi = (self.at + step + 1).min(ids.len());
+                self.at += ids[self.at..hi].partition_point(|&x| x < id);
             }
-            _ => self.at = self.ids.partition_point(|&x| x < id),
+            _ => self.at = ids.partition_point(|&x| x < id),
         }
-        self.ids.get(self.at) == Some(&id)
+        (ids.get(self.at) == Some(&id)).then_some(self.at)
     }
 }
 
