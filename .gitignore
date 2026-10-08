@@ -1,6 +1,7 @@
 # Nur Code und Dokumentation gehören ins Repo.
 __pycache__/
 *.pyc
+rust/target/
 .venv/
 venv/
 

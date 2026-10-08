@@ -502,6 +502,28 @@ Code, den Ghidra keiner Funktion zugeordnet hat, findet nur `InsnGrep` (im Outpu
 Dort sitzt z. B. die Schlüssel-Initialisierung (`0x1fd148`). Solche Stellen lassen sich mit
 Capstone disassemblieren.
 
+### 5.9 Rust-Portierung (`rust/`)
+
+Die Hülle gibt es auch in Rust: PC1, Header-MAC, rohes LZMA1, die Container A/B/C/D
+und osmpoint, der Schreiber und der Suchindex (`ta_index.rs`). Die Python-Werkzeuge
+bleiben die Referenz; geprüft wird gegen sie:
+
+```bash
+cd rust && cargo build --release
+./target/release/teasi check <karten>/Denmark_*.v2*   # 14.185 Records bytegleich, 1,3 s
+./target/release/teasi roundtrip <karten>/Denmark_ta.v20180608
+./target/release/teasi index <karten>/Denmark_ta.v20180608
+```
+
+Entschlüsseln ist 40- bis 70-mal schneller als in Python (PC1 schafft dort nur
+0,13 MB/s), Schreiben etwa 8-mal; dort bestimmt die LZMA-Kompression mit rund
+1,5 MB/s pro Kern die Untergrenze. Zwei Fallen stehen in `rust/README.md`:
+liblzma schreibt rohes LZMA1 nur als `.lzma` (13-B-Kopf abschneiden, und die Länge
+im Kopf muss „unbekannt" bleiben, sonst stört der End-Marker), und die Container
+müssen auch die unverstandenen Felder durchreichen.
+
+Die Extraktoren und die sechs Layer-Compiler sind noch nicht portiert.
+
 ---
 
 ## 6. Wichtige Adressen in `bikenav.exe`

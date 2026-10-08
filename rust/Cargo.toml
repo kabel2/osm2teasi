@@ -1,0 +1,15 @@
+[package]
+name = "teasi"
+version = "0.1.0"
+edition = "2021"
+description = "Read, verify and write Teasi/Tahuna chart files (Rust port of tools/)"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+md-5 = "0.10"
+rayon = "1"
+xz2 = "0.1"
+
+[profile.release]
+opt-level = 3

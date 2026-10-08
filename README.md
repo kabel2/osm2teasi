@@ -36,6 +36,7 @@ Jedes Format hat ein eigenes Dokument in [docs/](docs/), jeweils mit einem Absch
 ```
 tools/            Die Werkzeugkette: Hülle lesen/schreiben, Extraktoren, Compiler
 docs/             Formatdokumentation (deutsch), Einstieg: KARTEN_ENTSCHLUESSELUNG.md
+rust/             Rust-Portierung, Stufe 1: Hülle, Container, Schreiber, Suchindex
 ghidra_scripts/   Headless-Skripte für die Firmware-Analyse in Ghidra
 attic/            Einmal-Skripte aus der Analysephase, nicht gepflegt
 ```
@@ -96,6 +97,21 @@ export TEASI_DEVICE=2013021200000368   # eigene 16-stellige Seriennummer
 
 Damit das Gerät eine neu gebaute Datei ohne Warnung annimmt, müssen Größe und MD5 in
 `BikeNav/packages.xml` angepasst werden (`packages.py`, Doku Abschnitt 5.4).
+
+## Rust-Portierung
+
+In [rust/](rust/) liegt dieselbe Hülle in Rust: PC1, Prüfsumme, rohes LZMA1, alle
+Record-Container, der Schreiber und der Suchindex. Die Python-Werkzeuge bleiben die
+Referenz — der Abnahmetest ist, dass Rust jeden Record der Originalkarten bytegleich
+zerlegt und wieder zusammenbaut:
+
+```bash
+cd rust && cargo build --release && ./target/release/teasi check <karten>/Denmark_*.v2*
+```
+
+Alle 14.185 Records der dänischen Karte in 1,3 s; Entschlüsseln ist 40- bis 70-mal
+schneller als in Python, Schreiben etwa 8-mal. Die Layer-Compiler sind noch nicht
+portiert, Details in [rust/README.md](rust/README.md).
 
 ## Was hier nicht drin ist
 
