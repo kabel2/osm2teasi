@@ -89,10 +89,19 @@ which an environment variable overrides:
 export TEASI_DEVICE=2013021200000368   # your own 16-digit serial
 ```
 
+Only the **first eight digits** pick the key — they are the production date of a batch, and
+the 19 batches listed in `chart.rs` all share one built-in key. Every compiler also takes
+`--generic`, which leaves the serial out of the header checksum; the firmware then binds
+such a file to the first device that opens it (`FUN_001061bc`, read from the firmware and
+not yet confirmed on a device). A map built that way should therefore run on any device
+whose serial starts with one of those prefixes, which is what makes it worth passing on.
+
 `BikeNav/packages.xml` lists size and MD5 for every map file it knows. If they do not
 match, the device shows a warning at startup and loads the map anyway; a file with no entry
-is not checked. `teasi info` prints both values for a file, ready to paste into its
-`<size>` and `<md5>` (documentation section 5.4).
+is not checked at all. Giving a new map its own file name is therefore enough — nothing in
+`packages.xml` has to be touched. `teasi info` prints both values for a file, ready to paste
+into its `<size>` and `<md5>` if you do want to replace a map that is listed there
+(documentation section 5.4).
 
 ## What is not in here
 

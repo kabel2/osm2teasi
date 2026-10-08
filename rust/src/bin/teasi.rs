@@ -54,7 +54,11 @@ usage: teasi <command> [arguments]
                              libgeos), --rate=R the compression ratio,
                              --only=x,y builds a single region
 
-The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
+Every compiler takes --generic: the file is then signed for no device in
+particular and the firmware binds it to the first one that opens it, so the
+same file works on any device whose serial starts with the same eight digits.
+Without it the file is signed for TEASI_DEVICE (default: the serial in
+chart.rs), like every original file.";
 
 /// One decoded record with its place in the file.
 struct Decoded {
@@ -235,11 +239,11 @@ fn check(path: &str) -> Result<bool> {
 /// Decode a file, rebuild it with the writer and compare record by record.
 fn roundtrip(path: &str, out: Option<&str>) -> Result<bool> {
     let c = Chart::open(path)?;
-    let dev = chart::device();
+    let sign = chart::Signer::bound();
     let t0 = std::time::Instant::now();
     let (meta, content) = teasi::writer::read_all(&c)?;
     let tails: Vec<usize> = content.iter().map(|t| t.tail.len()).collect();
-    let new = teasi::writer::write_chart(&meta, &content, &dev, true, None)?;
+    let new = teasi::writer::write_chart(&meta, &content, &sign, None)?;
     let secs = t0.elapsed().as_secs_f32();
 
     if let Some(p) = out {
@@ -254,7 +258,7 @@ fn roundtrip(path: &str, out: Option<&str>) -> Result<bool> {
     };
     fail(new[..4] == c.data[..4], "magic");
     fail(new[0x44..0x58] == c.data[0x44..0x58], "date, type, layer, country");
-    fail(chart::header_md5(&new, &dev) == new[0x34..0x44], "MAC");
+    fail(sign.mac(&new) == new[0x34..0x44], "MAC");
     let old_dir: Vec<(u16, u16)> = c.tiles().iter().map(|t| (t.x, t.y)).collect();
     let nc = Chart { data: new.clone(), key: c.key.clone() };
     let new_dir: Vec<(u16, u16)> = nc.tiles().iter().map(|t| (t.x, t.y)).collect();
@@ -454,7 +458,7 @@ fn poi(path: &str, dst: &str) -> Result<bool> {
 
 /// Compile the osmpoi or osmpoint layer from a .osm.pbf.  Both layers read
 /// the same candidates, so one pass over the file serves either.
-fn compile_poi(layer: &str, args: &[String], country: u32) -> Result<bool> {
+fn compile_poi(layer: &str, args: &[String], country: u32, sign: &chart::Signer) -> Result<bool> {
     if args.len() < 3 {
         bail!("usage: teasi {} <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]", layer);
     }
@@ -469,11 +473,11 @@ fn compile_poi(layer: &str, args: &[String], country: u32) -> Result<bool> {
     let rings = teasi::poly::load(area)?;
     let (what, kept, d) = if layer == "osmpoint" {
         let pts = teasi::osmpoint::collect(&cands, Some(&rings));
-        let d = teasi::osmpoint::build(&pts, date.as_bytes(), country, &chart::device())?;
+        let d = teasi::osmpoint::build(&pts, date.as_bytes(), country, sign)?;
         ("seamarks", pts.len(), d)
     } else {
         let pois = teasi::osmpoi::collect(&cands, Some(&rings));
-        let d = teasi::osmpoi::build(&pois, date.as_bytes(), country, &chart::device())?;
+        let d = teasi::osmpoi::build(&pois, date.as_bytes(), country, sign)?;
         ("POIs", pois.len(), d)
     };
     std::fs::write(dst, &d)?;
@@ -597,6 +601,7 @@ fn compile_osm(
     country: u32,
     name: &str,
     heights: Option<&str>,
+    sign: &chart::Signer,
 ) -> Result<bool> {
     if args.len() < 4 {
         bail!("usage: teasi osm <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]");
@@ -629,7 +634,7 @@ fn compile_osm(
         hts.as_ref(),
         country,
         name,
-        &chart::device(),
+        sign,
         &|s| println!("  {}", s),
     )?;
     std::fs::write(dst, &d)?;
@@ -637,7 +642,7 @@ fn compile_osm(
     Ok(true)
 }
 
-fn compile_ta(args: &[String], country: u32, name: &str) -> Result<bool> {
+fn compile_ta(args: &[String], country: u32, name: &str, sign: &chart::Signer) -> Result<bool> {
     if args.len() < 3 {
         bail!("usage: teasi ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]");
     }
@@ -661,7 +666,7 @@ fn compile_ta(args: &[String], country: u32, name: &str) -> Result<bool> {
         date.as_bytes(),
         country,
         name,
-        &chart::device(),
+        sign,
         &log,
     )?;
     std::fs::write(dst, &d)?;
@@ -669,7 +674,12 @@ fn compile_ta(args: &[String], country: u32, name: &str) -> Result<bool> {
     Ok(true)
 }
 
-fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<bool> {
+fn compile_osmarea(
+    args: &[String],
+    country: u32,
+    land: Option<&str>,
+    sign: &chart::Signer,
+) -> Result<bool> {
     if args.len() < 4 {
         bail!("usage: teasi osmarea <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]");
     }
@@ -701,7 +711,7 @@ fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<
         land,
         date.as_bytes(),
         country,
-        &chart::device(),
+        sign,
         &|s| println!("  {}", s),
     )?;
     std::fs::write(dst, &d)?;
@@ -740,6 +750,7 @@ fn compile_terrain(
     land: Option<&str>,
     area: Option<&str>,
     only: Option<(i64, i64)>,
+    sign: &chart::Signer,
 ) -> Result<bool> {
     if args.len() < 3 {
         bail!(
@@ -776,7 +787,7 @@ fn compile_terrain(
         date.as_bytes(),
         country,
         rate,
-        &chart::device(),
+        sign,
         land.as_deref(),
         areas.as_ref(),
         only,
@@ -796,6 +807,11 @@ fn run() -> Result<bool> {
         .map(|a| a[2..].split_once('=').unwrap_or((&a[2..], "")))
         .collect();
     let opt = |name: &str| opts.iter().find(|(k, _)| *k == name).map(|(_, v)| *v);
+    // --generic: no serial in the MAC, so any device can bind the file itself
+    let sign = match opt("generic") {
+        Some(_) => chart::Signer::generic(),
+        None => chart::Signer::bound(),
+    };
     if args.is_empty() {
         println!("{}", USAGE);
         return Ok(false);
@@ -869,28 +885,28 @@ fn run() -> Result<bool> {
                 Some(v) => v.parse().context("--country")?,
                 None => 4,
             };
-            compile_osm(&args[1..], country, opt("name").unwrap_or("Denmark"), opt("heights"))
+            compile_osm(&args[1..], country, opt("name").unwrap_or("Denmark"), opt("heights"), &sign)
         }
         "ta" => {
             let country = match opt("country") {
                 Some(v) => v.parse().context("--country")?,
                 None => 17,
             };
-            compile_ta(&args[1..], country, opt("name").unwrap_or("United Kingdom"))
+            compile_ta(&args[1..], country, opt("name").unwrap_or("United Kingdom"), &sign)
         }
         "osmarea" => {
             let country = match opt("country") {
                 Some(v) => v.parse().context("--country")?,
                 None => 4,
             };
-            compile_osmarea(&args[1..], country, opt("land"))
+            compile_osmarea(&args[1..], country, opt("land"), &sign)
         }
         "osmpoi" | "osmpoint" => {
             let country = match opt("country") {
                 Some(v) => v.parse().context("--country")?,
                 None => 4,
             };
-            compile_poi(&args[0], &args[1..], country)
+            compile_poi(&args[0], &args[1..], country, &sign)
         }
         "dem" => {
             let sigma = match opt("sigma") {
@@ -915,7 +931,7 @@ fn run() -> Result<bool> {
                 },
                 None => None,
             };
-            compile_terrain(&args[1..], country, rate, opt("land"), opt("area"), only)
+            compile_terrain(&args[1..], country, rate, opt("land"), opt("area"), only, &sign)
         }
         "check" => {
             let mut ok = true;

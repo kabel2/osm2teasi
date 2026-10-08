@@ -104,16 +104,13 @@ fn build_tile(areas: &Areas, rk: &[u8], key: &[u8], tail: &[u8]) -> Result<Built
     Ok(Built { bytes: head, maxlen, maxraw })
 }
 
-/// `bind` signs the file for `device`, otherwise generically (the firmware then
-/// binds it on first open by rewriting salt and MAC).
 pub fn write_chart(
     meta: &Meta,
     tiles: &[TileContent],
-    device: &[u8],
-    bind: bool,
+    sign: &chart::Signer,
     rk: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    let key = chart::global_key(device);
+    let key = sign.key();
     let n = tiles.len();
     let jobs: Vec<&TileContent> = tiles.iter().filter(|t| t.areas.is_some()).collect();
     let keys: Vec<Vec<u8>> = jobs
@@ -174,7 +171,7 @@ pub fn write_chart(
     for b in blobs {
         d.extend_from_slice(b);
     }
-    let mac = chart::header_md5(&d, if bind { device } else { b"" });
+    let mac = sign.mac(&d);
     d[0x34..0x44].copy_from_slice(&mac);
     Ok(d)
 }

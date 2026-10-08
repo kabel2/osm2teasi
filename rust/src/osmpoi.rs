@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
+use crate::chart;
 use crate::layers::{build_osmpoi, PoiItem, LAYER_OSMPOI};
 use crate::poi::Cand;
 use crate::poly::{self, Ring};
@@ -401,7 +402,7 @@ pub fn collect(cands: &[Cand], area: Option<&[Ring]>) -> Vec<Poi> {
 // --------------------------------------------------------------------------
 
 /// Sort the POIs into cells of 32768 units, the cells into tiles of 32 x 32.
-pub fn build(pois: &[Poi], date: &[u8], country: u32, device: &[u8]) -> Result<Vec<u8>> {
+pub fn build(pois: &[Poi], date: &[u8], country: u32, sign: &chart::Signer) -> Result<Vec<u8>> {
     let mut cells: HashMap<(i64, i64), Vec<PoiItem>> = HashMap::new();
     for p in pois {
         let (cx, cy) = (p.x.div_euclid(CELL), p.y.div_euclid(CELL));
@@ -434,5 +435,5 @@ pub fn build(pois: &[Poi], date: &[u8], country: u32, device: &[u8]) -> Result<V
         country,
         tail_tile: None,
     };
-    writer::write_chart(&meta, &content, device, true, None)
+    writer::write_chart(&meta, &content, sign, None)
 }

@@ -181,9 +181,11 @@ device-bound:  MAC == MD5(salt ‖ SECRET ‖ file[0x44:0x444] ‖ file[-0x400:]
   `firmware/deviceid.dat`, `firmware/license.dat`).
 - Every file present (DK and DE) is signed **device-bound**.
 - If a file is signed **generically**, `FUN_001061bc` binds it to the device itself on first
-  opening: it generates a new random salt and rewrites the MAC with the serial number. Files
-  built here can therefore be signed either generically (for any device) or device-bound
-  straight away.
+  opening: it generates a new random salt and rewrites the MAC with the serial number. Every
+  compiler here takes `--generic` for that (`chart::Signer`), and signs for `TEASI_DEVICE`
+  without it. Note what the generic variant does **not** change: the record key still comes
+  from the first eight digits of the serial (section 4), so such a file is readable on every
+  device whose serial carries one of the 19 known prefixes and on no other.
 - Because the MAC covers the first and the last kilobyte of the file, it has to be
   recomputed **after** every change.
 
@@ -412,9 +414,22 @@ teasi info $C/Map/Countries/Denmark_osm.v20210916     # prints size and md5
 ```
 
 Put those two numbers into the `<size>` and `<md5>` of the entry whose `<url>` ends in that
-file name. **Files without an entry** are not checked but are loaded anyway: the firmware
-reads every `*.v*` in `Countries` (which is how the Great Britain files run, 5.7). With the
-entries updated the message disappears (checked on the device, 2026-09-18).
+file name. With the entries updated the message disappears (checked on the device,
+2026-09-18).
+
+**The simpler route is to avoid the file.** Entries are matched by file name, and **files
+without an entry** are not checked but are loaded anyway: the firmware reads every `*.v*` in
+`Countries`. That is how the Great Britain files run (5.7) — they have no entry at all, and
+no message appears. So a map under a name of its own needs no change to `packages.xml`; only
+replacing a file that is listed there does. Two cases are untested: an entry whose file has
+been renamed away, and two files for the same country in `Countries` at once.
+
+**Passing a map on to someone else** needs `--generic` (section 2), because a file signed for
+one serial does not open on another device. The checksum above survives the firmware's
+rebinding, since it starts at 0x44, behind salt and MAC — but it is computed over the
+*encrypted* payload, and each build draws a fresh record key per tile, so two builds of the
+same data have different checksums. Whoever builds the file has to publish its size and MD5
+along with it, or the recipients simply leave `packages.xml` alone.
 
 ### 5.5 The extractors and the elevation model
 

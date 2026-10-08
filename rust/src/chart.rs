@@ -67,6 +67,43 @@ pub fn header_md5(d: &[u8], device: &[u8]) -> [u8; 16] {
     h.finalize().into()
 }
 
+/// Who a freshly built file is signed for.  The serial always picks the record
+/// key (`global_key`), `bind` decides what the header MAC covers:
+///
+/// - **bound** names the device, like every original file.
+/// - **generic** leaves it out, and the firmware binds the file to whatever
+///   device opens it first by rewriting salt and MAC (`FUN_001061bc`, see
+///   docs/CHART_FILES.md 2).  The `packages.xml` checksum survives that,
+///   because it starts behind both.
+///
+/// A generic file therefore runs on every device whose serial starts with the
+/// same eight digits -- that is what the record key is derived from.
+pub struct Signer {
+    pub device: Vec<u8>,
+    pub bind: bool,
+}
+
+impl Signer {
+    /// Bound to `TEASI_DEVICE`, or to the serial above.
+    pub fn bound() -> Signer {
+        Signer { device: device(), bind: true }
+    }
+
+    /// Signed for no device in particular.
+    pub fn generic() -> Signer {
+        Signer { device: device(), bind: false }
+    }
+
+    pub fn key(&self) -> Vec<u8> {
+        global_key(&self.device)
+    }
+
+    /// The header MAC of a finished file.
+    pub fn mac(&self, d: &[u8]) -> [u8; 16] {
+        header_md5(d, if self.bind { &self.device } else { b"" })
+    }
+}
+
 /// The checksum `BikeNav/packages.xml` carries for a map file: 1 KB from 0x44
 /// (behind the salt and the MAC) plus the last KB, see docs/CHART_FILES.md 5.4.
 pub fn package_md5(d: &[u8]) -> md5::digest::Output<Md5> {

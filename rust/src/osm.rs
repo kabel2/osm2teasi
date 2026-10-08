@@ -567,7 +567,7 @@ pub fn build(
     heights: Option<&Heights>,
     country: u32,
     cname: &str,
-    device: &[u8],
+    sign: &chart::Signer,
     log: &dyn Fn(&str),
 ) -> Result<Vec<u8>> {
     let t0 = std::time::Instant::now();
@@ -1189,7 +1189,7 @@ pub fn build(
         country,
         tail_tile: None,
     };
-    writer::write_chart(&meta, &content, device, true, None)
+    writer::write_chart(&meta, &content, sign, None)
 }
 
 /// One item of a D record before the name offsets are known.

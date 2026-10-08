@@ -22,6 +22,7 @@ use anyhow::{ensure, Result};
 use rayon::prelude::*;
 
 use crate::addr::{Addr, Extract, Interp, Place};
+use crate::chart;
 use crate::geos::Geom;
 use crate::grid::Grid;
 use crate::layers::{self, u16enc, AItem, ARec, ArrayRec, Item, Sub18, Var, D_SPEC, LAYER_TA};
@@ -1238,7 +1239,7 @@ pub fn build(
     date: &[u8],
     country: u32,
     cname: &str,
-    device: &[u8],
+    sign: &chart::Signer,
     log: &dyn Fn(&str),
 ) -> Result<Vec<u8>> {
     let t0 = std::time::Instant::now();
@@ -1529,5 +1530,5 @@ pub fn build(
         country,
         tail_tile: Some((last.0 as u16, last.1 as u16)),
     };
-    writer::write_chart(&meta, &content, device, true, None)
+    writer::write_chart(&meta, &content, sign, None)
 }

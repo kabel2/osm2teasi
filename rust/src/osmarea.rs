@@ -584,7 +584,7 @@ pub fn build(
     land: Option<Vec<Geom>>,
     date: &[u8],
     country: u32,
-    device: &[u8],
+    sign: &chart::Signer,
     log: &dyn Fn(&str),
 ) -> Result<Vec<u8>> {
     let t0 = std::time::Instant::now();
@@ -745,5 +745,5 @@ pub fn build(
         country,
         tail_tile: None,
     };
-    writer::write_chart(&meta, &content, device, true, None)
+    writer::write_chart(&meta, &content, sign, None)
 }

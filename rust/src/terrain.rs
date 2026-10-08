@@ -518,7 +518,7 @@ pub fn build(
     date: &[u8],
     country: u32,
     rate: f32,
-    device: &[u8],
+    sign: &chart::Signer,
     land: Option<&[Geom]>,
     areas: Option<&Extract>,
     only: Option<(i64, i64)>,
@@ -549,7 +549,7 @@ pub fn build(
         None => None,
     };
 
-    let key = chart::global_key(device);
+    let key = sign.key();
     let t0 = std::time::Instant::now();
     let mut out: Vec<(i64, i64, Vec<u8>)> = Vec::new();
     let mut maxlen = 0usize;
@@ -600,7 +600,7 @@ pub fn build(
     for (_, _, blob) in &out {
         d.extend_from_slice(blob);
     }
-    let mac = chart::header_md5(&d, device);
+    let mac = sign.mac(&d);
     d[0x34..0x44].copy_from_slice(&mac);
     Ok(d)
 }

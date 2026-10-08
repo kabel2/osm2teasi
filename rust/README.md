@@ -13,7 +13,7 @@ and map images) and **the elevation grid** itself, from the Copernicus DEM.
 | PC1, MD5 checksum, global key | `pc1.rs`, `chart.rs` | |
 | Raw LZMA1 as in the originals | `lzma.rs` | `xz2`, see the pitfalls at the end |
 | Containers A, B, C, D, osmpoint | `layers.rs` | |
-| Writing files, device binding | `writer.rs` | |
+| Writing files, device binding | `writer.rs` | `chart::Signer`, bound or `--generic` |
 | Search index of the address search | `ta_index.rs` | |
 | Reading OSM PBF, node index | `pbf.rs` | the `osmpbf` crate, instead of pyosmium |
 | Addresses, places, interpolation ways | `addr.rs` | |

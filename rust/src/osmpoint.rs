@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 
+use crate::chart;
 use crate::layers::{build_osmpoint, u16enc, PointObj, PointRec, Sector, LAYER_OSMPOINT};
 use crate::pbf::TagMap;
 use crate::osmpoi::round_even;
@@ -705,7 +706,7 @@ fn record(points: &[&Point], cell_x: i64, cell_y: i64) -> Vec<u8> {
 }
 
 /// Sort the seamarks into cells of 32768 units, the cells into tiles of 4 x 4.
-pub fn build(points: &[Point], date: &[u8], country: u32, device: &[u8]) -> Result<Vec<u8>> {
+pub fn build(points: &[Point], date: &[u8], country: u32, sign: &chart::Signer) -> Result<Vec<u8>> {
     let mut cells: BTreeMap<(i64, i64), Vec<&Point>> = BTreeMap::new();
     for p in points {
         cells.entry((p.x.div_euclid(CELL), p.y.div_euclid(CELL))).or_default().push(p);
@@ -732,5 +733,5 @@ pub fn build(points: &[Point], date: &[u8], country: u32, device: &[u8]) -> Resu
         country,
         tail_tile: None,
     };
-    writer::write_chart(&meta, &content, device, true, None)
+    writer::write_chart(&meta, &content, sign, None)
 }
