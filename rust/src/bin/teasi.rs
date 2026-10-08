@@ -696,7 +696,10 @@ fn compile_ta(args: &[String], country: u32, name: &str, sign: &chart::Signer) -
     let w = teasi::way::extract(src, &|a| a.cls >= 0, &log)?;
     let rings = teasi::poly::load(area)?;
     let p = teasi::osmarea::boundary_at(&rings, 1.0)?;
-    let d = teasi::ta::build(w, ad, &p, date.as_bytes(), country, name, sign, &log)?;
+    let Some(d) = teasi::ta::build(w, ad, &p, date.as_bytes(), country, name, sign, &log)? else {
+        println!("no named streets in this area, no file written");
+        return Ok(true);
+    };
     std::fs::write(dst, &d)?;
     println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
     Ok(true)
@@ -809,7 +812,7 @@ fn compile_terrain(
         Some(pbf) => Some(teasi::area::extract(pbf, &|s| println!("  {}", s))?),
         None => None,
     };
-    let d = teasi::terrain::build(
+    let Some(d) = teasi::terrain::build(
         &g,
         &rings,
         date.as_bytes(),
@@ -820,7 +823,11 @@ fn compile_terrain(
         areas.as_ref(),
         only,
         &|s| println!("  {}", s),
-    )?;
+    )?
+    else {
+        println!("no heights and no images in this area, no file written");
+        return Ok(true);
+    };
     std::fs::write(dst, &d)?;
     println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
     Ok(true)

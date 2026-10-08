@@ -523,7 +523,7 @@ pub fn build(
     areas: Option<&Extract>,
     only: Option<(i64, i64)>,
     log: &dyn Fn(&str),
-) -> Result<Vec<u8>> {
+) -> Result<Option<Vec<u8>>> {
     let pts: Vec<(f64, f64)> = rings.iter().flat_map(|r| r.pts.iter().cloned()).collect();
     ensure!(!pts.is_empty(), "the boundary polygon is empty");
     let lon: Vec<f64> = pts.iter().map(|p| p.0 / 2f64.powi(28) * 360.0 - 180.0).collect();
@@ -595,6 +595,10 @@ pub fn build(
         }
     }
 
+    // no heights and no images anywhere (an atoll): no file
+    if out.is_empty() {
+        return Ok(None);
+    }
     let n = out.len();
     let mut off = 0x78 + 8 * n;
     let mut d: Vec<u8> = Vec::new();
@@ -616,5 +620,5 @@ pub fn build(
     }
     let mac = sign.mac(&d)?;
     d[0x34..0x44].copy_from_slice(&mac);
-    Ok(d)
+    Ok(Some(d))
 }

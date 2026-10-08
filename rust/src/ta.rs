@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::f64::consts::PI;
 
-use anyhow::{ensure, Result};
+use anyhow::Result;
 use rayon::prelude::*;
 
 use crate::addr::{Addr, Extract, Interp, Place};
@@ -1259,7 +1259,7 @@ pub fn build(
     cname: &str,
     sign: &chart::Signer,
     log: &dyn Fn(&str),
-) -> Result<Vec<u8>> {
+) -> Result<Option<Vec<u8>>> {
     let t0 = std::time::Instant::now();
     let since = |s: String| format!("{} ({:.0} s)", s, t0.elapsed().as_secs_f32());
     let pb = p.buffer(CELL as f64)?;
@@ -1535,7 +1535,11 @@ pub fn build(
                 .insert(slot, raw);
         }
     }
-    ensure!(!tiles.is_empty(), "no tile has a record");
+    // no named street at all (Tokelau): a file without a record is not a
+    // chart file, so there is none
+    if tiles.is_empty() {
+        return Ok(None);
+    }
     let last = *tiles.keys().next_back().unwrap();
     let content: Vec<TileContent> = tiles
         .into_iter()
@@ -1554,5 +1558,5 @@ pub fn build(
         country,
         tail_tile: Some((last.0 as u16, last.1 as u16)),
     };
-    writer::write_chart(&meta, &content, sign, None)
+    writer::write_chart(&meta, &content, sign, None).map(Some)
 }
