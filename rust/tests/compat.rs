@@ -4,7 +4,7 @@
 //! CLI rather than here.
 
 use md5::{Digest, Md5};
-use teasi::{chart, layers, lzma, pc1, ta_index};
+use teasi::{chart, layers, lzma, osmpoi, pc1, ta_index};
 
 fn key() -> Vec<u8> {
     (0..32u8).collect()
@@ -165,12 +165,32 @@ fn fsum_matches_pythons_sum() {
 }
 
 #[test]
-fn ring_centre_drops_the_repeated_point() {
-    let pts = [(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (1.0, 10.0)];
-    assert_eq!(teasi::osm::ring_centre(&pts), Some((2.0, 20.0)));
-    assert_eq!(teasi::osm::ring_centre(&pts[..3]), Some((2.0, 20.0)));
-    assert_eq!(teasi::osm::ring_centre(&[(5.0, 6.0)]), Some((5.0, 6.0)));
-    assert_eq!(teasi::osm::ring_centre(&[]), None);
+fn rings_are_joined_at_shared_ends() {
+    use teasi::osm::assemble_rings;
+    // two ways forming one ring, the second one reversed
+    let ways = vec![vec![1, 2, 3], vec![5, 4, 3], vec![1, 5]];
+    assert_eq!(assemble_rings(&ways), Some(vec![vec![1, 2, 3, 4, 5]]));
+    // a closed way is a ring of its own, minus the repeated end
+    assert_eq!(assemble_rings(&[vec![1, 2, 3, 1]]), Some(vec![vec![1, 2, 3]]));
+    // two independent rings
+    assert_eq!(
+        assemble_rings(&[vec![1, 2, 1], vec![7, 8, 7]]),
+        Some(vec![vec![1, 2], vec![7, 8]])
+    );
+    assert_eq!(assemble_rings(&[vec![1, 2, 3]]), None); // stays open
+}
+
+#[test]
+fn an_inner_ring_does_not_count_towards_the_centre() {
+    use teasi::osm::area_centre;
+    // a 10 x 10 square with a small ring inside it: the centre is the square's
+    let outer = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)];
+    let inner = vec![(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0), (4.0, 4.0)];
+    let only_outer = area_centre(std::slice::from_ref(&outer)).unwrap();
+    assert_eq!(area_centre(&[outer.clone(), inner]), Some(only_outer));
+    // the first point counts twice, which is what libosmium's rings do
+    assert_eq!(only_outer, (4.0, 4.0));
+    assert_eq!(area_centre(&[]), None);
 }
 
 #[test]
@@ -191,4 +211,89 @@ fn probe_finds_the_same_ids_as_a_binary_search() {
     }
     let empty = teasi::osm::NodeIndex::new(vec![]);
     assert!(!empty.probe().wants(5));
+}
+
+// --------------------------------------------------------------------------
+// osmpoi (tools/compile_osmpoi.py)
+// --------------------------------------------------------------------------
+
+fn tags<'a>(pairs: &'a [(&'a str, &'a str)]) -> osmpoi::Tags<'a> {
+    osmpoi::tags_of(pairs.iter().copied())
+}
+
+#[test]
+fn poi_rules_match_python() {
+    // first match in RULES wins, and the two early returns do not fall through
+    assert_eq!(osmpoi::poi_type(&tags(&[("amenity", "fuel")]), true), Some(0x0B));
+    assert_eq!(
+        osmpoi::poi_type(&tags(&[("amenity", "cafe"), ("shop", "bicycle")]), true),
+        Some(0x01) // shop=bicycle is listed before amenity=cafe
+    );
+    assert_eq!(
+        osmpoi::poi_type(&tags(&[("amenity", "place_of_worship"), ("religion", "jewish")]), true),
+        Some(0x24)
+    );
+    assert_eq!(
+        osmpoi::poi_type(&tags(&[("amenity", "place_of_worship"), ("shop", "bicycle")]), true),
+        None // place_of_worship without a known religion is not a POI
+    );
+    // aerodromes only count as nodes
+    assert_eq!(osmpoi::poi_type(&tags(&[("aeroway", "aerodrome")]), true), Some(0x27));
+    assert_eq!(osmpoi::poi_type(&tags(&[("aeroway", "aerodrome")]), false), None);
+    // historic=* unless it is one of the skipped values
+    assert_eq!(osmpoi::poi_type(&tags(&[("historic", "castle")]), true), Some(0x48));
+    assert_eq!(osmpoi::poi_type(&tags(&[("historic", "wall")]), true), None);
+    assert_eq!(osmpoi::poi_type(&tags(&[("name", "nowhere")]), true), None);
+}
+
+#[test]
+fn poi_attributes_match_python() {
+    let t = tags(&[
+        ("addr:street", "Hauptstr."),
+        ("addr:housenumber", "7"),
+        ("addr:city", "Esbjerg"),
+        ("opening_hours", "Mo-Fr 08:00-18:00; Sa 09:00-13:00"),
+        ("contact:phone", "+45 1"),
+        ("access", "yes"),
+    ]);
+    assert_eq!(
+        osmpoi::attributes(&t),
+        "00Hauptstr. 7\nEsbjerg|02+45 1|03Mo-Fr 08:00-18:00\nSa 09:00-13:00|74yes"
+    );
+    // no address tags at all: no 00 entry
+    assert_eq!(osmpoi::attributes(&tags(&[("website", "x")])), "01x");
+    assert_eq!(osmpoi::attributes(&tags(&[])), "");
+}
+
+#[test]
+fn osmpoi_record_round_trip() {
+    let pois = vec![
+        layers::PoiItem { typ: 0x0B, pos: 0x1234_5678, name: "Tankstelle".into(), attrs: "74yes".into() },
+        layers::PoiItem { typ: 0x1D, pos: 1, name: "Kirche \u{1F600}".into(), attrs: String::new() },
+    ];
+    let raw = layers::build_osmpoi(&pois);
+    assert_eq!(layers::parse_osmpoi(&raw).unwrap(), pois);
+    // the header announces the array size and the item count, nothing else
+    let rec = layers::parse_d(&raw).unwrap();
+    assert_eq!(rec.hdr[0], 2 * 0x18);
+    assert_eq!(rec.hdr[11], 2);
+}
+
+#[test]
+fn poi_centroid_matches_python() {
+    // unit square: centroid in the middle, whichever vertex it starts at
+    let sq = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)];
+    assert_eq!(teasi::poi::centroid(&sq), Some((1.0, 1.0)));
+    assert_eq!(teasi::poi::centroid(&[(0.0, 0.0), (1.0, 1.0)]), None); // degenerate
+}
+
+#[test]
+fn poly_contains_counts_holes() {
+    use teasi::poly::Ring;
+    let outer = Ring { pts: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], hole: false };
+    let hole = Ring { pts: vec![(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0)], hole: true };
+    let rings = vec![outer, hole];
+    assert!(teasi::poly::contains(&rings, 1.0, 1.0));
+    assert!(!teasi::poly::contains(&rings, 5.0, 5.0));
+    assert!(!teasi::poly::contains(&rings, 11.0, 5.0));
 }

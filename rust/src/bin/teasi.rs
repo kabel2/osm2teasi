@@ -21,6 +21,10 @@ usage: teasi <command> [arguments]
   index <ta chart|table>     search index: parse, rebuild and compare
   addr <file.osm.pbf> [out]  addresses, places and interpolation ways from OSM
                              (out: canonical dump to compare with Python)
+  poi <file.osm.pbf> <out>   POI candidates as a canonical dump
+  osmpoi <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD] [--country=N]
+                             compile the osmpoi layer (country 4 = Denmark,
+                             17 = United Kingdom)
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
 
@@ -378,8 +382,80 @@ fn addr(path: &str, out: Option<&str>) -> Result<bool> {
     Ok(true)
 }
 
+/// POI candidates as the canonical dump scripts/poi_dump.py writes from the
+/// Python pickle, so the two can be compared line by line.
+fn poi(path: &str, dst: &str) -> Result<bool> {
+    let t0 = std::time::Instant::now();
+    let cands = teasi::poi::extract(path, &|s| println!("  {}", s))?;
+    let mut lines: Vec<String> = cands
+        .iter()
+        .map(|c| {
+            let centre = match c.centre {
+                Some((x, y)) => format!("{}:{}", bits(x), bits(y)),
+                None => "-".to_string(),
+            };
+            format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                c.kind,
+                c.id,
+                c.typ,
+                bits(c.x),
+                bits(c.y),
+                centre,
+                flat(Some(&c.name)),
+                flat(Some(&c.attrs))
+            )
+        })
+        .collect();
+    lines.sort();
+    std::fs::write(dst, lines.join("\n") + "\n")?;
+    println!(
+        "{}: {} candidates -> {} in {:.1} s",
+        path.rsplit('/').next().unwrap(),
+        lines.len(),
+        dst,
+        t0.elapsed().as_secs_f32()
+    );
+    Ok(true)
+}
+
+/// Compile the osmpoi layer from a .osm.pbf.  Port of tools/compile_osmpoi.py.
+fn osmpoi(args: &[String], country: u32) -> Result<bool> {
+    if args.len() < 3 {
+        bail!("usage: teasi osmpoi <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]");
+    }
+    let (src, area, dst) = (&args[0], &args[1], &args[2]);
+    let date = match args.get(3) {
+        Some(d) => d.clone(),
+        None => chart::today(),
+    };
+    let t0 = std::time::Instant::now();
+    let cands = teasi::poi::extract(src, &|s| println!("  {}", s))?;
+    let n = cands.len();
+    let rings = teasi::poly::load(area)?;
+    let pois = teasi::osmpoi::collect(cands, Some(&rings));
+    let d = teasi::osmpoi::build(&pois, date.as_bytes(), country, &chart::device())?;
+    std::fs::write(dst, &d)?;
+    println!(
+        "{} candidates, {} POIs, {} B -> {} in {:.1} s",
+        n,
+        pois.len(),
+        d.len(),
+        dst,
+        t0.elapsed().as_secs_f32()
+    );
+    Ok(true)
+}
+
 fn run() -> Result<bool> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = all.iter().filter(|a| !a.starts_with("--")).cloned().collect();
+    let opts: Vec<(&str, &str)> = all
+        .iter()
+        .filter(|a| a.starts_with("--"))
+        .map(|a| a[2..].split_once('=').unwrap_or((&a[2..], "")))
+        .collect();
+    let opt = |name: &str| opts.iter().find(|(k, _)| *k == name).map(|(_, v)| *v);
     if args.is_empty() {
         println!("{}", USAGE);
         return Ok(false);
@@ -420,6 +496,19 @@ fn run() -> Result<bool> {
                 bail!("usage: teasi addr <file.osm.pbf> [dump]");
             }
             addr(&args[1], args.get(2).map(|s| s.as_str()))
+        }
+        "poi" => {
+            if args.len() < 3 {
+                bail!("usage: teasi poi <file.osm.pbf> <out>");
+            }
+            poi(&args[1], &args[2])
+        }
+        "osmpoi" => {
+            let country = match opt("country") {
+                Some(v) => v.parse().context("--country")?,
+                None => 4,
+            };
+            osmpoi(&args[1..], country)
         }
         "check" => {
             let mut ok = true;

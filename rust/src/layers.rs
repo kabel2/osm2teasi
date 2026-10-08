@@ -236,6 +236,67 @@ pub fn parse_c(raw: &[u8]) -> Result<ArrayRec> {
 }
 
 // --------------------------------------------------------------------------
+// osmpoi: only array a5 of a D record is used (OSMPOI_FORMAT.md)
+// --------------------------------------------------------------------------
+
+/// a5 struct: [0] pointer to the name, [1] its length in UTF-16 units,
+/// [2]/[3] the same for the attribute string, [4] POI type, [5] position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoiItem {
+    pub typ: u32,
+    pub pos: u32,
+    pub name: String,
+    pub attrs: String,
+}
+
+/// UTF-16 code units of `text` including the terminating NUL; empty for "".
+pub fn u16enc(text: &str) -> Vec<u16> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// UTF-16 code units -> string, without the terminating NUL.
+pub fn u16str(v: &[u16]) -> String {
+    let s = String::from_utf16_lossy(v);
+    s.trim_end_matches('\0').to_string()
+}
+
+pub fn parse_osmpoi(raw: &[u8]) -> Result<Vec<PoiItem>> {
+    let rec = parse_d(raw)?;
+    Ok(rec
+        .get("a5", &D_SPEC)
+        .iter()
+        .map(|it| {
+            let text = |i: usize| match &it.v[i] {
+                Var::U16(v) => u16str(v),
+                Var::U32(_) => String::new(),
+            };
+            PoiItem { typ: it.s[4], pos: it.s[5], name: text(0), attrs: text(1) }
+        })
+        .collect())
+}
+
+pub fn build_osmpoi(pois: &[PoiItem]) -> Vec<u8> {
+    let a5: Vec<Item> = pois
+        .iter()
+        .map(|p| {
+            let (name, attrs) = (u16enc(&p.name), u16enc(&p.attrs));
+            Item {
+                s: vec![0, name.len() as u32, 0, attrs.len() as u32, p.typ, p.pos],
+                v: vec![Var::U16(name), Var::U16(attrs)],
+            }
+        })
+        .collect();
+    let mut hdr = vec![0u32; D_HDR];
+    hdr[0] = (a5.len() * 0x18) as u32;
+    hdr[11] = a5.len() as u32;
+    let rec = ArrayRec { hdr, arrays: vec![Vec::new(), Vec::new(), Vec::new(), Vec::new(), a5] };
+    build_arrays(&rec, &D_SPEC)
+}
+
+// --------------------------------------------------------------------------
 // slot area A (4x4 cells), FUN_003e6044: osm and ta.  Not transposed.
 // --------------------------------------------------------------------------
 

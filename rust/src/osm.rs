@@ -112,6 +112,17 @@ impl NodeIndex {
         Some(xy_dm(lon, lat))
     }
 
+    /// Decimicrodegrees as the file stores them; libosmium compares locations
+    /// in these integers, so ring normalisation needs them unconverted.
+    pub fn get_dm(&self, id: i64) -> Option<(i32, i32)> {
+        let i = self.ids.binary_search(&id).ok()?;
+        let p = self.pos[i];
+        if p == (i32::MIN, i32::MIN) {
+            return None;
+        }
+        Some(p)
+    }
+
     pub fn missing(&self) -> usize {
         self.pos.iter().filter(|p| **p == (i32::MIN, i32::MIN)).count()
     }
@@ -198,19 +209,107 @@ pub fn fsum<I: Iterator<Item = f64>>(xs: I) -> f64 {
     s + c
 }
 
-/// Centre of a way or area: the mean of its points.
-///
-/// A closed ring repeats its first point as the last one; that copy is dropped,
-/// so the result does not depend on where the ring starts.  libosmium rotates
-/// assembled rings to begin at the geometrically smallest vertex and therefore
-/// doubles a different point -- for area addresses its centre is a few metres
-/// away from this one (see rust/README.md).
-pub fn ring_centre(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
-    let pts = match pts {
-        [] => return None,
-        [first, .., last] if first == last => &pts[..pts.len() - 1],
-        _ => pts,
-    };
+/// Mean of the points, the way Python's `sum(...) / len(...)` computes it.
+pub fn mean(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
+    if pts.is_empty() {
+        return None;
+    }
     let n = pts.len() as f64;
     Some((fsum(pts.iter().map(|p| p.0)) / n, fsum(pts.iter().map(|p| p.1)) / n))
+}
+
+// --------------------------------------------------------------------------
+// areas the way libosmium assembles them
+// --------------------------------------------------------------------------
+//
+// The Python extractors get their area geometry from libosmium, so anything
+// derived from it -- above all the centre of an area -- only comes out the same
+// if its two conventions are reproduced:
+//
+//   * A ring starts at its geometrically smallest vertex and repeats it at the
+//     end.  (libosmium normalises every segment so that the smaller location
+//     comes first, sorts the segments and starts the ring at the first of them.)
+//     Which vertex is doubled shifts the mean by metres, so the rotation matters.
+//   * Outer and inner rings are told apart by how deeply they are nested, not by
+//     the member roles -- those are merely a hint and are routinely wrong.
+
+/// Join ways into closed rings of node ids, each without the repeated end.
+/// None when a ring stays open: libosmium then builds no area at all.
+pub fn assemble_rings(ways: &[Vec<i64>]) -> Option<Vec<Vec<i64>>> {
+    let mut used = vec![false; ways.len()];
+    let mut out: Vec<Vec<i64>> = Vec::new();
+    for start in 0..ways.len() {
+        if used[start] || ways[start].len() < 2 {
+            continue;
+        }
+        used[start] = true;
+        let mut ring = ways[start].clone();
+        while ring[0] != *ring.last().unwrap() {
+            let end = *ring.last().unwrap();
+            let mut found = false;
+            for (i, w) in ways.iter().enumerate() {
+                if used[i] || w.len() < 2 {
+                    continue;
+                }
+                if w[0] == end {
+                    ring.extend_from_slice(&w[1..]);
+                } else if *w.last().unwrap() == end {
+                    ring.extend(w[..w.len() - 1].iter().rev());
+                } else {
+                    continue;
+                }
+                used[i] = true;
+                found = true;
+                break;
+            }
+            if !found {
+                return None;
+            }
+        }
+        ring.pop();
+        out.push(ring);
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// The points of one ring, rotated to start at its smallest vertex and closed
+/// by repeating that vertex -- see the note above.  The comparison is made on
+/// the decimicrodegrees, because that is what libosmium compares.
+pub fn ring_points(ring: &[i64], index: &NodeIndex) -> Option<Vec<(f64, f64)>> {
+    let dm: Vec<(i32, i32)> = ring.iter().map(|id| index.get_dm(*id)).collect::<Option<_>>()?;
+    let at = (0..dm.len()).min_by_key(|&i| dm[i])?;
+    let mut pts: Vec<(f64, f64)> =
+        dm[at..].iter().chain(dm[..at].iter()).map(|&(lon, lat)| xy_dm(lon, lat)).collect();
+    pts.push(pts[0]);
+    Some(pts)
+}
+
+/// Mean over the points of the outer rings; None if none of them is outer.
+/// A ring nested in an even number of other rings is an outer one.
+pub fn area_centre(rings: &[Vec<(f64, f64)>]) -> Option<(f64, f64)> {
+    let outer: Vec<(f64, f64)> = rings
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| {
+            let (x, y) = r[0];
+            let depth = rings
+                .iter()
+                .enumerate()
+                .filter(|(j, o)| j != i && crate::poly::inside(o, x, y))
+                .count();
+            depth % 2 == 0
+        })
+        .flat_map(|(_, r)| r.iter().copied())
+        .collect();
+    mean(&outer)
+}
+
+/// Every ring of an area, ready for [`area_centre`].  `ways` are the member
+/// ways' node ids -- for a closed way that is just the way itself.
+pub fn area_rings(ways: &[Vec<i64>], index: &NodeIndex) -> Option<Vec<Vec<(f64, f64)>>> {
+    assemble_rings(ways)?.iter().map(|r| ring_points(r, index)).collect()
 }

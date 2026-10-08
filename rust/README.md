@@ -1,15 +1,15 @@
 # teasi (Rust)
 
 Portierung der Werkzeugkette nach Rust. Fertig sind **die Hülle** (Stufe 1:
-Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex)
-und **das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion).
-Die Python-Werkzeuge in [../tools/](../tools/) bleiben die Referenz; was hier steht,
-muss dasselbe liefern.
+Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex),
+**das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion) und
+**der erste Layer-Compiler** (Stufe 3: `osmpoi`, aus dem PBF direkt in die
+Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben die Referenz;
+was hier steht, muss dasselbe liefern.
 
-Noch nicht portiert: die sechs Layer-Compiler (`compile_*.py`). Die Semantik der
-Records — Straßenklassen, Flags, POI-Typen, Hausnummern — steckt dort und nicht in
-diesen Stufen; hier werden alle Felder, auch die unverstandenen, unverändert
-durchgereicht.
+Noch nicht portiert: die fünf übrigen Layer-Compiler (`compile_osm.py`,
+`compile_osmarea.py`, `compile_osmpoint.py`, `compile_ta.py`,
+`compile_terrain.py`).
 
 ## Stand
 
@@ -22,8 +22,11 @@ durchgereicht.
 | Suchindex der Adresssuche | `ta_index.py` | `ta_index.rs` |
 | OSM-PBF lesen, Knoten-Index | pyosmium | `osm.rs` |
 | Adressen, Orte, Interpolationswege | `osm_addr_extract.py` | `addr.rs` |
-| Straßen, POIs, Flächen, Höhen lesen | `osm_extract.py` u. a. | – |
-| Layer bauen | `compile_*.py` | – |
+| Landesgrenze (`.poly`) | `poly.py` | `poly.rs` |
+| POIs lesen | `osm_poi_extract.py` | `poi.rs` |
+| Layer `osmpoi` bauen | `compile_osmpoi.py` | `osmpoi.rs` |
+| Straßen, Flächen, Höhen lesen | `osm_extract.py` u. a. | – |
+| Die fünf übrigen Layer bauen | `compile_*.py` | – |
 
 ## Bauen und prüfen
 
@@ -52,6 +55,8 @@ osmpoint 110) in 1,3 s.
 | `teasi dump <karte> <ordner>` | entschlüsselte Records als Einzeldateien |
 | `teasi index <ta-karte>` | Suchindex zerlegen und bytegleich neu bauen |
 | `teasi addr <datei.osm.pbf> [aus]` | Adressen, Orte und Interpolationswege aus OSM |
+| `teasi poi <datei.osm.pbf> <aus>` | POI-Kandidaten als kanonischer Dump |
+| `teasi osmpoi <pbf> <poly> <karte> [datum]` | den osmpoi-Layer bauen (`--country=N`) |
 
 Die Seriennummer kommt wie bei den Python-Werkzeugen aus `TEASI_DEVICE`
 (Standard: die in `chart.rs`).
@@ -107,11 +112,10 @@ python scripts/addr_compare.py py.txt rs.txt
 **Dänemark** (`denmark-latest`): dieselben 2.628.399 Einträge, keiner fehlt, keiner
 kommt dazu; die 2.614.459 Adressen und 12.511 Orte an Knoten sind **bitgleich**.
 
-**Großbritannien**: 5.023.358 Adressen und 29.868 Interpolationswege wie in Python,
-deren 140.467 Punkte bitgleich. Bei den Orten fehlen 3 von 111.340, bei den Adressen
-fehlen 2 und 2 kommen dazu — Flächen mit kaputten Ringen, bei denen libosmiums
-Zusammenbau und der einfache Test hier (jedes Wegende muss an einer geraden Zahl von
-Wegen hängen) unterschiedlich entscheiden.
+**Großbritannien**: 5.022.875 der 5.023.357 Adressen bitgleich, 111.333 der 111.338
+Orte, alle 140.467 Interpolationspunkte. Von den Adressen weichen 480 um Median 0,78 m
+ab (höchstens 40 m), von den Orten 5; 3 Adressen und 2 Orte fehlen, 2 Adressen kommen
+dazu. Alles davon sind Flächen mit kaputten Ringen (siehe unten).
 
 | | Python | Rust |
 |---|---:|---:|
@@ -121,26 +125,80 @@ Wegen hängen) unterschiedlich entscheiden.
 Die drei Durchgänge brauchen für Großbritannien 6, 8 und 11 s; ein Durchgang über die
 2,2 GB kostet allein rund 6 s, der Rest ist die eigentliche Arbeit.
 
-### Wo Rust abweicht: Mittelpunkte von Flächen
+### Flächen so zusammenbauen wie libosmium
 
-Eine Adresse an einem Gebäudepolygon bekommt als Position den Mittelwert der
-Eckpunkte. libosmium dreht einen zusammengesetzten Ring aber so, dass er am
-geometrisch kleinsten Eckpunkt beginnt, und der Ring wiederholt seinen ersten Punkt
-am Ende — der Mittelwert zählt also einen Punkt doppelt, und zwar einen anderen als
-in der Reihenfolge des Wegs. `ring_centre` lässt den wiederholten Punkt deshalb weg;
-das Ergebnis hängt dann nicht mehr davon ab, wo der Ring anfängt.
+Eine Adresse oder ein POI an einem Polygon bekommt als Position den Mittelwert der
+Eckpunkte. Die Python-Werkzeuge holen diese Punkte von libosmium, und das hat zwei
+Konventionen, die man beide nachbauen muss, sonst liegt der Mittelpunkt Meter daneben
+(`osm.rs`, Abschnitt „areas the way libosmium assembles them"):
 
-Betroffen sind nur Einträge aus Flächen — in Dänemark 164 von 2,6 Mio. Adressen, in
-Großbritannien dagegen 4,3 von 5,0 Mio., weil dort fast jede Adresse an einem
-Gebäudepolygon hängt. Die Abweichung ist klein: Median 1,6 m, 90 % unter 2,2 m, bei
-Orten Median 5,1 m. Im Extremfall — eine riesige Fläche mit wenigen Eckpunkten — sind
-es einige hundert Meter. Für den ta-Layer ist das ohne Belang: Adressen werden mit
-100 m Radius auf Straßenstücke gezogen, Orte dienen als Anker mit Radien von 800 bis
-12.000 m.
+- **Ein Ring beginnt an seinem geometrisch kleinsten Eckpunkt** und wiederholt ihn am
+  Ende. libosmium normiert jede Kante so, dass der kleinere Endpunkt vorne steht,
+  sortiert die Kanten und fängt den Ring bei der ersten an. Der Mittelwert zählt
+  dadurch einen Punkt doppelt — und bei der Reihenfolge des Wegs wäre es ein anderer.
+- **Außen und innen entscheidet die Verschachtelung, nicht die Member-Rolle.** Ein Ring
+  in einer geraden Zahl anderer Ringe ist außen. Die Rollen in OSM sind oft falsch —
+  in Großbritannien gibt es Multipolygone, deren Außenringe als `inner` oder gar als
+  `building` eingetragen sind.
 
-Die andere Stelle war feiner: CPythons `sum()` summiert Gleitkommazahlen seit 3.12
+Damit sind die Flächenadressen bitgleich: vor dieser Nachbildung wichen 4,3 von
+5,0 Mio. britischen Adressen um Median 1,6 m ab, jetzt sind es 480.
+
+**Was übrig bleibt**, sind Flächen, deren Ringe nicht sauber schließen. Der
+Zusammenbau hier ist einfach — Wege an gemeinsamen Enden aneinanderhängen —, während
+libosmium eine Kantenmenge sortiert, doppelte Kanten entfernt und an Berührpunkten
+aufteilt. Zwei geschlossene Wege, die sich in zwei Knoten berühren, werden dort zu
+*einem* Ring verschmolzen, hier bleiben es zwei; in Großbritannien betrifft das 156
+von 2142 POI-Relationen (Median 1,3 m, im Extremfall 242 m). In vier Fällen baut
+libosmium eine Fläche ganz ohne Außenring und liefert deshalb keinen POI, hier
+entsteht einer; in einem Fall ist es umgekehrt.
+
+Eine zweite Stelle war feiner: CPythons `sum()` summiert Gleitkommazahlen seit 3.12
 **kompensiert** (Neumaier). Ein naives `for`-Summieren in Rust lag deshalb ein Bit
 daneben — `osm::fsum` macht es jetzt genauso.
+
+## Stufe 3: der osmpoi-Layer
+
+`poi.rs` ist `osm_poi_extract.py --filter`, `osmpoi.rs` ist `compile_osmpoi.py`:
+Typ-Regeln, Attribut-String, Entdoppeln, Aufteilen in Zellen und Kacheln. Dazwischen
+kein Pickle — ein Befehl vom Extrakt bis zur Kartendatei:
+
+```bash
+./target/release/teasi osmpoi osm_ref/great-britain-latest.osm.pbf \
+    osm_ref/great-britain.poly build/GreatBritain_osmpoi.v20260918 20260918 --country=17
+```
+
+Geprüft wird zweistufig. Erst die Kandidaten gegen das Python-Pickle, wie bei den
+Adressen:
+
+```bash
+./target/release/teasi poi osm_ref/denmark-latest.osm.pbf rs.txt
+python scripts/poi_dump.py build/ref/poi_dk.pkl py.txt
+python scripts/poi_compare.py py.txt rs.txt      # paart über Art und OSM-Id
+```
+
+Dann die fertige Datei Record für Record gegen die mit Python gebaute Karte
+(`teasi md5s` auf beiden, `diff`). Die Dateien selbst unterscheiden sich immer, denn
+jede Kachel bekommt einen neuen Zufallsschlüssel; die entschlüsselten Records müssen
+gleich sein.
+
+| | Kandidaten bitgleich | Records bitgleich |
+|---|---|---|
+| Dänemark | 88.978 Knoten, 18.596 Wege, 323 von 330 Relationen | 3692 von 3699 |
+| Großbritannien | 601.625 Knoten, 217.134 Wege, 1982 von 2142 Relationen | 15.498 von 15.619 |
+
+Alle Abweichungen sind die Flächen-Ringe von oben: Knoten und Wege stimmen zu 100 %,
+nur bei Multipolygonen liegt der Mittelpunkt um Meter daneben.
+
+| | Python (nur die Extraktion) | Rust (PBF → Kartendatei) |
+|---|---:|---:|
+| Dänemark (494 MB PBF) | 3 min | 5,0 s |
+| Großbritannien (2,2 GB PBF) | 24 min | 29 s, 0,7 GB |
+
+Der Abstand ist größer als bei den Adressen, weil `poi_type` in Python für jedes
+Objekt bis zu 43 `dict.get`-Aufrufe macht — über Großbritannien 370 Millionen. Hier
+werden die interessanten Tags beim Lesen einmal in ein Array geschrieben und die
+Regeln darauf geprüft.
 
 ## Zwei Fallen
 

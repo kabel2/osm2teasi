@@ -174,6 +174,9 @@ oder die `seamark:type` haben (osmpoint); für Dänemark ergibt das dieselben Da
 - `compile_osmpoi.py` ordnet die Typen zu, baut Attribute, entfernt Doppelte, gruppiert nach
   32×32-Unterzelle und schreibt die Datei mit `writer.py`. Das Datum (Header `0x44`) ist
   standardmäßig heute.
+- In Rust macht `teasi osmpoi <pbf> <poly> <ausgabe> [JJJJMMTT] --country=N` beides in
+  einem Lauf, ohne Pickle; für Großbritannien 29 s statt 24 min allein für die
+  Extraktion (`rust/README.md`, Stufe 3).
 - `denmark.poly` ist die Geofabrik-Grenze (`download.geofabrik.de/europe/denmark.poly`). Nur POIs
   darin werden übernommen, denn der Extrakt enthält auch Ways und Relationen, die weit ins
   Ausland reichen (z. B. Punkte bei 51° N, 1° E). **Die Färöer fehlen** im Geofabrik-Extrakt

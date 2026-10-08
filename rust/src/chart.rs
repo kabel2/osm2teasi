@@ -29,6 +29,25 @@ pub fn device() -> Vec<u8> {
         .into_bytes()
 }
 
+/// Today as "YYYYMMDD", the default version date of a freshly built chart.
+/// Days to a calendar date after Howard Hinnant's civil_from_days.
+pub fn today() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before 1970")
+        .as_secs();
+    let z = (secs / 86400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{:04}{:02}{:02}", y, m, d)
+}
+
 pub fn global_key(device_id: &[u8]) -> Vec<u8> {
     let prefix = &device_id[..8.min(device_id.len())];
     if KNOWN_PREFIXES.iter().any(|p| p.as_slice() == prefix) {

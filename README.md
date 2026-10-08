@@ -36,7 +36,7 @@ Jedes Format hat ein eigenes Dokument in [docs/](docs/), jeweils mit einem Absch
 ```
 tools/            Die Werkzeugkette: Hülle lesen/schreiben, Extraktoren, Compiler
 docs/             Formatdokumentation (deutsch), Einstieg: KARTEN_ENTSCHLUESSELUNG.md
-rust/             Rust-Portierung, Stufe 1: Hülle, Container, Schreiber, Suchindex
+rust/             Rust-Portierung: Hülle, OSM lesen, osmpoi-Compiler
 ghidra_scripts/   Headless-Skripte für die Firmware-Analyse in Ghidra
 attic/            Einmal-Skripte aus der Analysephase, nicht gepflegt
 ```
@@ -101,20 +101,24 @@ Damit das Gerät eine neu gebaute Datei ohne Warnung annimmt, müssen Größe un
 ## Rust-Portierung
 
 In [rust/](rust/) wird die Werkzeugkette nach Rust portiert. Fertig sind die Hülle
-(PC1, Prüfsumme, rohes LZMA1, alle Record-Container, Schreiber, Suchindex) und das
-Lesen von OSM (PBF-Leser, Knoten-Index, Adressextraktion). Die Python-Werkzeuge
-bleiben die Referenz; geprüft wird gegen sie:
+(PC1, Prüfsumme, rohes LZMA1, alle Record-Container, Schreiber, Suchindex), das Lesen
+von OSM (PBF-Leser, Knoten-Index, Adressextraktion) und der erste Layer-Compiler
+(`osmpoi`, vom Extrakt direkt in die Kartendatei). Die Python-Werkzeuge bleiben die
+Referenz; geprüft wird gegen sie:
 
 ```bash
 cd rust && cargo build --release
 ./target/release/teasi check <karten>/Denmark_*.v2*      # Records bytegleich
-./target/release/teasi addr osm_ref/denmark-latest.osm.pbf
+./target/release/teasi osmpoi osm_ref/great-britain-latest.osm.pbf \
+    osm_ref/great-britain.poly build/GreatBritain_osmpoi.v20260918 20260918 --country=17
 ```
 
 Alle 14.185 Records der dänischen Karte in 1,3 s zerlegt und bytegleich neu gebaut;
 Entschlüsseln ist 40- bis 70-mal schneller als in Python, Schreiben etwa 8-mal, die
-Adressextraktion 56-mal (Dänemark 270 s → 4,8 s). Die Layer-Compiler sind noch nicht
-portiert, Details in [rust/README.md](rust/README.md).
+Adressextraktion 56-mal (Dänemark 270 s → 4,8 s). Der osmpoi-Layer für
+Großbritannien braucht 29 s statt 24 min allein für die Extraktion, und 15.498 seiner
+15.619 Records sind bytegleich mit der Python-Version. Die fünf übrigen Compiler
+fehlen noch, Details in [rust/README.md](rust/README.md).
 
 ## Was hier nicht drin ist
 

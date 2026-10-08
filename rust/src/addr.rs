@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Result;
 use osmpbf::PrimitiveBlock;
 
-use crate::osm::{par_blocks, ring_centre, xy_dm, NodeIndex};
+use crate::osm::{area_centre, area_rings, par_blocks, xy_dm, NodeIndex};
 
 /// place=* values the Python extractor keeps.
 pub const PLACES: [&str; 13] = [
@@ -162,13 +162,14 @@ fn pass1(path: &str) -> Result<Vec<RelCand>> {
                     if !tags.multipolygon || !(tags.addr.is_addr() || tags.place.is_place()) {
                         continue;
                     }
+                    // every way member, once: libosmium ignores the roles too, and
+                    // a way listed twice contributes its ring only once
+                    let mut seen = HashSet::new();
                     let ways: Vec<i64> = r
                         .members()
-                        .filter(|m| {
-                            m.member_type == osmpbf::RelMemberType::Way
-                                && matches!(m.role(), Ok("outer") | Ok(""))
-                        })
+                        .filter(|m| m.member_type == osmpbf::RelMemberType::Way)
                         .map(|m| m.member_id)
+                        .filter(|id| seen.insert(*id))
                         .collect();
                     if !ways.is_empty() {
                         acc.push(RelCand { tags, ways });
@@ -317,44 +318,23 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
 
     let mut out = Extract { addr: p3.addr, places: p3.places, interp: Vec::new() };
 
-    // areas: closed ways and assembled multipolygons
+    // areas: closed ways (one ring each) and multipolygons (one per member way)
     let by_id: HashMap<i64, &WayGeom> = p2.members.iter().map(|g| (g.id, g)).collect();
-    let mut areas: Vec<(&Tags, Vec<i64>)> =
-        p2.areas.iter().map(|g| (&g.tags, g.refs.clone())).collect();
-    let mut open_rings = 0;
+    let mut areas: Vec<(&Tags, Vec<Vec<i64>>)> =
+        p2.areas.iter().map(|g| (&g.tags, vec![g.refs.clone()])).collect();
     for r in &rels {
-        let mut refs = Vec::new();
-        let mut ends: HashMap<i64, usize> = HashMap::new();
-        let mut complete = true;
-        for w in &r.ways {
-            match by_id.get(w) {
-                Some(g) if g.refs.len() >= 2 => {
-                    refs.extend(g.refs.iter().copied());
-                    *ends.entry(g.refs[0]).or_default() += 1;
-                    *ends.entry(g.refs[g.refs.len() - 1]).or_default() += 1;
-                }
-                _ => complete = false,
-            }
-        }
-        // libosmium only builds an area when the member ways close into rings;
-        // then every way end is shared by an even number of ways.  Without this
-        // test, relations whose members are missing from the extract would
-        // produce a centre from a torn ring.
-        if !complete || refs.is_empty() || ends.values().any(|n| n % 2 != 0) {
+        let ways: Vec<Vec<i64>> =
+            r.ways.iter().filter_map(|w| by_id.get(w).map(|g| g.refs.clone())).collect();
+        areas.push((&r.tags, ways));
+    }
+    let n_closed = p2.areas.len();
+    let mut open_rings = 0;
+    for (tags, ways) in &areas {
+        // libosmium only builds an area when the member ways close into rings
+        let Some((x, y)) = area_rings(ways, &index).as_deref().and_then(area_centre) else {
             open_rings += 1;
             continue;
-        }
-        areas.push((&r.tags, refs));
-    }
-    log(&since(format!(
-        "areas: {} from closed ways, {} from relations ({} rejected as open)",
-        p2.areas.len(),
-        areas.len() - p2.areas.len(),
-        open_rings
-    )));
-    for (tags, refs) in areas {
-        let pts: Vec<(f64, f64)> = refs.iter().filter_map(|id| index.get(*id)).collect();
-        let Some((x, y)) = ring_centre(&pts) else { continue };
+        };
         if tags.addr.is_addr() {
             out.addr.push(Addr { x, y, tags: tags.addr.clone() });
         }
@@ -362,6 +342,12 @@ pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Extract> {
             out.places.push(Place { x, y, tags: tags.place.clone(), area: true });
         }
     }
+    log(&since(format!(
+        "areas: {} from closed ways, {} from relations ({} without a closed ring)",
+        n_closed,
+        areas.len() - n_closed,
+        open_rings
+    )));
 
     // interpolation ways with the house numbers of their nodes
     let numbers: HashMap<i64, (Option<String>, Option<String>)> =

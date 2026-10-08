@@ -524,12 +524,28 @@ müssen auch die unverstandenen Felder durchreichen.
 
 Ebenfalls portiert ist das Lesen von OSM (`osm.rs`: PBF-Leser und Knoten-Index,
 `addr.rs`: `osm_addr_extract.py`). Für Dänemark liefert es dieselben 2.628.399
-Einträge wie Python, die Knoten-Einträge bitgleich, in 4,8 statt 270 s; Abweichungen
-gibt es nur bei Mittelpunkten von Flächen (Median 2,3 m, Begründung in
-`rust/README.md`). Geprüft wird mit `rust/scripts/addr_dump.py` und
-`rust/scripts/addr_compare.py` gegen das Python-Pickle.
+Einträge wie Python, in 4,8 statt 270 s; für Großbritannien 5.022.875 der 5.023.357
+Adressen und 111.333 der 111.338 Orte bitgleich. Geprüft wird mit
+`rust/scripts/addr_dump.py` und `rust/scripts/addr_compare.py` gegen das Pickle.
 
-Die übrigen Extraktoren und die sechs Layer-Compiler sind noch nicht portiert.
+Dass die Flächen-Mittelpunkte überhaupt stimmen, liegt an zwei nachgebauten
+libosmium-Konventionen (`osm.rs`): ein Ring beginnt an seinem geometrisch kleinsten
+Eckpunkt und wiederholt ihn am Ende, und außen/innen entscheidet die Verschachtelung
+der Ringe, nicht die Member-Rolle. Ohne das lagen 4,3 von 5,0 Mio. britischen
+Adressen um Median 1,6 m daneben.
+
+Der erste Layer-Compiler ist portiert: `poi.rs` + `osmpoi.rs` bauen den osmpoi-Layer
+in einem Lauf aus dem PBF (Großbritannien 29 s statt 24 min allein für die
+Extraktion). Von 15.619 Records der britischen Karte sind 15.498 bytegleich mit der
+Python-Version; die Unterschiede sind Multipolygone mit sich berührenden Ringen, die
+libosmiums Zusammenbau anders aufteilt.
+
+```bash
+./target/release/teasi osmpoi <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
+./target/release/teasi md5s <karte>   # auf beiden Dateien, dann diff
+```
+
+Die übrigen Extraktoren und die fünf anderen Layer-Compiler sind noch nicht portiert.
 
 ---
 
