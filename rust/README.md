@@ -3,13 +3,13 @@
 Portierung der Werkzeugkette nach Rust. Fertig sind **die Hülle** (Stufe 1:
 Entschlüsselung, Kompression, alle Record-Container, der Schreiber, der Suchindex),
 **das Lesen von OSM** (Stufe 2: PBF-Leser, Knoten-Index, Adressextraktion) und
-**vier Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint`, `osmarea` und `osm`, aus dem
-PBF direkt in die Kartendatei). Die Python-Werkzeuge in [../tools/](../tools/) bleiben
-die Referenz; was hier steht, muss dasselbe liefern.
+**alle fünf OSM-Layer-Compiler** (Stufe 3: `osmpoi`, `osmpoint`, `osmarea`, `osm` und
+`ta`, aus dem PBF direkt in die Kartendatei). Die Python-Werkzeuge in
+[../tools/](../tools/) bleiben die Referenz; was hier steht, muss dasselbe liefern.
 
-Noch nicht portiert: die zwei übrigen Layer-Compiler (`compile_ta.py`,
-`compile_terrain.py`) und die Höhenquellen selbst (`osm_heights.py`,
-`dem_heights.py` — ihre Ergebnisse liest Rust, s. u.).
+Noch nicht portiert: `compile_terrain.py` (Stufe 4, offene JPEG-2000-Frage) und die
+Höhenquellen selbst (`osm_heights.py`, `dem_heights.py` — ihre Ergebnisse liest Rust,
+s. u.).
 
 ## Stand
 
@@ -33,7 +33,9 @@ Noch nicht portiert: die zwei übrigen Layer-Compiler (`compile_ta.py`,
 | Straßen- und Linien-Ways lesen | `osm_extract.py` | `way.rs` |
 | Höhen einlesen und abfragen | `osm_heights.py`, `dem_heights.py` | `heights.rs` |
 | Layer `osm` bauen | `compile_osm.py` | `osm.rs` |
-| Die zwei übrigen Layer bauen | `compile_ta.py`, `compile_terrain.py` | – |
+| Nachbarsuche (statt scipys kd-Baum) | `scipy.spatial` | `grid.rs` |
+| Layer `ta` bauen (Adresssuche) | `compile_ta.py` | `ta.rs` |
+| Höhenmodell und Kartenbilder | `compile_terrain.py` | – |
 
 ## Bauen und prüfen
 
@@ -71,6 +73,7 @@ osmpoint 110) in 1,3 s.
 | `teasi osmarea <pbf> <poly> <original\|-> <karte> [datum]` | den osmarea-Layer bauen (`--country=N`, `--land=…`) |
 | `teasi ways <datei.osm.pbf> <aus>` | Straßen- und Linien-Ways als kanonischer Dump |
 | `teasi osm <pbf> <poly> <original\|-> <karte> [datum]` | den osm-Layer bauen (`--country=N`, `--name=…`, `--heights=…`) |
+| `teasi ta <pbf> <poly> <karte> [datum]` | die Adresssuche bauen (`--country=N`, `--name=…`) |
 
 Die Seriennummer kommt wie bei den Python-Werkzeugen aus `TEASI_DEVICE`
 (Standard: die in `chart.rs`).
@@ -404,6 +407,83 @@ Knotenhöhen, die auf **derselben Position** liegen und verschiedene Höhen trag
 zu 6 cm auseinander, Rekonstruktionsrauschen von `lsqr`); welcher der beiden in den
 Mittelwert der 4 Nachbarn eingeht, ist in beiden Implementierungen Zufall. Großbritannien
 nimmt den Rasterweg und ist deshalb vollständig identisch.
+
+## Stufe 3: der Layer ta (Adresssuche)
+
+Der letzte OSM-Compiler und der mit den meisten Regeln: `compile_ta.py` schneidet die
+benannten Straßen in Stücke, hängt jede Hausnummer an das nächste Stück gleichen
+Namens, gibt jedem Stück seine Orte, fasst Stücke zu Straßen zusammen und baut daraus
+die D- und A-Records plus den landesweiten **Suchindex**.
+
+```bash
+./target/release/teasi ta --country=17 "--name=United Kingdom" \
+    osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly \
+    build/GreatBritain_ta.v20260919 20260919
+```
+
+`ta.rs` braucht beides, die Adressen (`addr.rs`) und die Straßen (`way.rs`), und liest
+die PBF-Datei dafür zweimal. `grid.rs` ersetzt scipys `cKDTree`: ein gleichmäßiges
+Raster über die Punkte, ringweise nach außen durchsucht. Gebraucht werden drei
+Abfragen — die 8 nächsten Orte innerhalb eines Radius (`query(k=8,
+distance_upper_bound=…)`), der nächste Ortsknoten eines Namens und alle Paare unter
+60 m (`query_pairs`).
+
+### Reihenfolge ist hier alles
+
+In `compile_ta.py` hängen mehr Ergebnisse an Reihenfolgen als in jedem anderen
+Compiler: `Counter.most_common` bricht Gleichstände nach Einfügereihenfolge, die
+Mittelpunkte der Postleitzahlbezirke sind Gleitkommasummen, und die Reihenfolge der
+Index-Treffer ist die, in der sie entstanden sind. `ta.rs` hat deshalb eine
+`Ordered`-Map und einen `Counter`, die sich wie Pythons `dict` und
+`collections.Counter` verhalten. Dazu **drei Änderungen in Python**, alle damit
+derselbe Lauf zweimal dasselbe liefert:
+
+1. Adressen, Orte und Interpolationslinien werden **kanonisch sortiert**. Der Extraktor
+   liefert sie in libosmiums Reihenfolge; die ist nicht nachbaubar (und Rust liest die
+   Blöcke parallel).
+2. Die **Kinder eines Suchindex-Knotens** werden nach Zeichen sortiert. Vorher wurden
+   sie in der Iterationsreihenfolge eines `set` von Strings angehängt — die wechselt
+   mit dem Hash-Seed von Lauf zu Lauf, Python war also nicht einmal mit sich selbst
+   reproduzierbar.
+3. Die **Richtung eines Hausnummernbereichs** (von/bis) kommt aus der Korrelation
+   zwischen Position und Nummer. Ist die Korrelation 10⁻¹⁷, laufen die Nummern gar
+   nicht entlang des Stücks, und das letzte Bit von numpys Kovarianz entschied, ob der
+   Bereich auf- oder abwärts zählt. Beide Seiten nehmen jetzt Korrelationen unter
+   10⁻¹² als null (`CORR_TOL`).
+
+Die dritte Änderung war die letzte Abweichung: ohne sie waren es 2 dänische und 37
+britische Records, mit ihr keine mehr.
+
+### Geprüft gegen Python
+
+```bash
+python tools/compile_ta.py --country=4 --name=Denmark ways.pkl addr.pkl denmark.poly py.v2 20260918
+./target/release/teasi ta --country=4 --name=Denmark denmark-latest.osm.pbf denmark.poly rs.v2 20260918
+./target/release/teasi md5s py.v2 ; ./target/release/teasi md5s rs.v2     # dann diff
+./target/release/teasi index rs.v2                                        # Suchindex
+```
+
+| | Dänemark | Großbritannien |
+|---|---|---|
+| Records bitgleich | **alle 3958** | 13.679 von 13.680 |
+| Suchindex | **bytegleich** (1.943.962 B) | 9 von 522.760 Knoten anders |
+| Dateigröße | **24.644.993 B, identisch** | **113.851.396 B, identisch** |
+| Laufzeit (PBF → Kartendatei) | 40 s | 3:19, 13,7 GB |
+| Python (ab Pickle) | 85 s + 2 min Extraktion | 4:12, ~16 GB + 12 + 20 min Extraktion |
+
+Auch hier stimmen alle Zwischenzahlen: Dänemark 408.262 benannte Straßen, 1.257.070
+Kanten, 1.296.848 Stücke, 2.480.980 zugeordnete Hausnummern auf 735.263 Stücken,
+117.162 Straßen, 99 A- und 3859 D-Records, 12.483 Orte mit Straßen und 4935 ohne;
+Großbritannien 1.969.512 / 5.225.753 / 5.334.223 / 4.909.355 / 915.297, 376 A- und
+13.304 D-Records, 48.352 Orte mit Straßen, 82.998 ohne und 2603
+Postleitzahlbezirke.
+
+Der eine abweichende britische Record und die 9 Index-Knoten gehen **nicht** auf den
+ta-Compiler zurück, sondern auf den bekannten Rest im Adressextraktor (Flächen, deren
+Ringe sich selbst berühren): Rust findet 2 Adressen mehr, davon macht eine aus dem
+Bereich 111–147 den Bereich 111–149, und eine verschiebt den Mittelpunkt des Bezirks
+BN10 um 5 cm; die zwei anderen betroffenen Index-Treffer sind die beiden Ortsflächen,
+die schon dort um 27 m abweichen.
 
 ## Zwei Fallen
 

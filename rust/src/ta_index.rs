@@ -12,6 +12,19 @@ use anyhow::{ensure, Result};
 /// Language mask "all languages".
 pub const ALL: u64 = u64::MAX;
 
+/// Search key normalisation, `fold()` in tools/ta_index.py: lower case,
+/// Danish letters spelled out, accents dropped.
+pub fn fold(s: &str) -> String {
+    use unicode_normalization::char::canonical_combining_class;
+    use unicode_normalization::UnicodeNormalization;
+    let folded: String = s
+        .to_lowercase()
+        .replace('\u{f8}', "o")
+        .replace('\u{e6}', "a")
+        .replace('\u{df}', "ss");
+    folded.nfkd().filter(|&c| canonical_combining_class(c) == 0).collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Name {
     /// Word offsets into the pool, joined with a space.

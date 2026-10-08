@@ -40,6 +40,9 @@ usage: teasi <command> [arguments]
                              compile the street layer; --heights=<file> adds the
                              ascents (scripts/heights_export.py), --name=<country>
                              the country name of the A records (needs libgeos)
+  ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]
+                             compile the address search incl. its search index
+                             (--country=N, --name=<country>; needs libgeos)
 
 The device serial comes from TEASI_DEVICE (default: the one in chart.rs).";
 
@@ -622,6 +625,38 @@ fn compile_osm(
     Ok(true)
 }
 
+fn compile_ta(args: &[String], country: u32, name: &str) -> Result<bool> {
+    if args.len() < 3 {
+        bail!("usage: teasi ta <file.osm.pbf> <area.poly> <out chart> [YYYYMMDD]");
+    }
+    teasi::geos::available()?;
+    let (src, area, dst) = (&args[0], &args[1], &args[2]);
+    let date = match args.get(3) {
+        Some(d) => d.clone(),
+        None => chart::today(),
+    };
+    let t0 = std::time::Instant::now();
+    println!("  libgeos {}", teasi::geos::version()?);
+    let log = |s: &str| println!("  {}", s);
+    let mut ad = teasi::addr::extract(src, &log)?;
+    let mut w = teasi::way::extract(src, &log)?;
+    let rings = teasi::poly::load(area)?;
+    let p = teasi::osmarea::boundary_at(&rings, 1.0)?;
+    let d = teasi::ta::build(
+        &mut w,
+        &mut ad,
+        &p,
+        date.as_bytes(),
+        country,
+        name,
+        &chart::device(),
+        &log,
+    )?;
+    std::fs::write(dst, &d)?;
+    println!("{} B -> {} in {:.1} s", d.len(), dst, t0.elapsed().as_secs_f32());
+    Ok(true)
+}
+
 fn compile_osmarea(args: &[String], country: u32, land: Option<&str>) -> Result<bool> {
     if args.len() < 4 {
         bail!("usage: teasi osmarea <file.osm.pbf> <area.poly> <original|-> <out chart> [YYYYMMDD]");
@@ -745,6 +780,13 @@ fn run() -> Result<bool> {
                 None => 4,
             };
             compile_osm(&args[1..], country, opt("name").unwrap_or("Denmark"), opt("heights"))
+        }
+        "ta" => {
+            let country = match opt("country") {
+                Some(v) => v.parse().context("--country")?,
+                None => 17,
+            };
+            compile_ta(&args[1..], country, opt("name").unwrap_or("United Kingdom"))
         }
         "osmarea" => {
             let country = match opt("country") {

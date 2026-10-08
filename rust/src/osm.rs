@@ -35,7 +35,7 @@ pub const MARGIN: f64 = 512.0;
 /// B nodes: 65536 units (360/2^27 degrees) per 8x8 cell
 const BCELL: f64 = 65536.0;
 /// length units per metre (~4.19)
-const LEN_FACTOR: f64 = 5.0 * (1u64 << 25) as f64 / (2.0 * std::f64::consts::PI * 6371000.0);
+pub const LEN_FACTOR: f64 = 5.0 * (1u64 << 25) as f64 / (2.0 * std::f64::consts::PI * 6371000.0);
 /// Douglas-Peucker tolerance of the overview lines (360/2^25)
 const C_TOLERANCE: f64 = 32.0;
 /// cells are kept if they touch the area polygon plus this much
@@ -417,15 +417,20 @@ fn turns(out: &[(Vec<u32>, i8, f64)]) -> u32 {
 
 // ---- names ---------------------------------------------------------------
 
+/// `str.casefold()`: lower case, plus the two mappings that differ from it
+/// and can turn up in a name.
+pub fn casefold(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c == '\u{3c2}' { '\u{3c3}' } else { c })
+        .collect::<String>()
+        .replace('\u{df}', "ss")
+}
+
 /// Sort key of a street name: case-folded, Danish letters spelled out, accents
 /// dropped -- `unicodedata.normalize("NFKD", ...)` without the combining marks.
 pub fn sort_key(name: &str) -> String {
-    let folded: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c == '\u{3c2}' { '\u{3c3}' } else { c })
-        .collect();
-    let folded = folded.replace('\u{df}', "ss").replace('\u{e6}', "ae").replace('\u{f8}', "o");
+    let folded = casefold(name).replace('\u{e6}', "ae").replace('\u{f8}', "o");
     folded.nfkd().filter(|&c| canonical_combining_class(c) == 0).collect()
 }
 

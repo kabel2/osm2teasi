@@ -536,7 +536,7 @@ wiederholt ihn am Ende; außen/innen entscheidet die Verschachtelung, nicht die
 Member-Rolle; und `area=no` verbietet die Fläche. Ohne das lagen 4,3 von 5,0 Mio.
 britischen Adressen um Median 1,6 m daneben.
 
-Vier Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
+Fünf Layer-Compiler sind portiert. `poi.rs` liest die Kandidaten für `osmpoi.rs` und
 `osmpoint.rs`, alles in einem Lauf über das PBF (Großbritannien 35 bzw. 17 s statt
 24 min allein für die Extraktion); für Dänemark sind alle 3699 osmpoi- und alle 128
 osmpoint-Records bytegleich mit der Python-Version, für Großbritannien
@@ -557,16 +557,29 @@ selbst (`osm_heights.py` mit scipys `lsqr`, `dem_heights.py` mit dem Copernicus-
 bleiben in Python; `rust/scripts/heights_export.py` schreibt ihr Pickle in eine flache
 Binärdatei für `--heights=`.
 
+`ta.rs` (mit `grid.rs` statt scipys kd-Baum) baut die Adresssuche samt Suchindex: für
+Dänemark sind **alle 3958 Records und der Suchindex bytegleich**, für Großbritannien
+13.679 von 13.680 Records, und beide Dateien sind auf das Byte gleich groß
+(113.851.396 B) — in 3:19 statt 4:12 und mit 13,7 statt 16 GB. Die eine Abweichung ist
+ein Hausnummernbereich, der 149 statt 147 endet, weil der Rust-Adressextraktor zwei
+Adressen mehr findet (derselbe Rest wie oben). Dafür brauchte `compile_ta.py` drei
+Änderungen, damit zwei Läufe überhaupt dasselbe liefern: Adressen, Orte und
+Interpolationslinien kanonisch sortiert, die Kinder eines Suchindex-Knotens nach
+Zeichen (vorher die Iterationsreihenfolge eines `set`, also vom Hash-Seed abhängig),
+und eine Korrelation unter 10⁻¹² gilt als null, statt mit ihrem letzten Bit die
+Richtung eines Hausnummernbereichs zu bestimmen.
+
 ```bash
 ./target/release/teasi osmpoi  <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osmpoint <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osmarea <pbf> <poly> <original|-> <ausgabe> [JJJJMMTT] --country=17
 ./target/release/teasi osm <pbf> <poly> <original|-> <ausgabe> [JJJJMMTT] --country=17 \
     "--name=United Kingdom" --heights=<datei.bin>
+./target/release/teasi ta <pbf> <poly> <ausgabe> [JJJJMMTT] --country=17 "--name=United Kingdom"
 ./target/release/teasi md5s <karte>   # auf beiden Dateien, dann diff
 ```
 
-`osmarea` und `osm` brauchen **libgeos** (shapely benutzt es auch, und bitgleich wird es
+`osmarea`, `osm` und `ta` brauchen **libgeos** (shapely benutzt es auch, und bitgleich wird es
 nur mit derselben Version): `geos.rs` lädt die Bibliothek zur Laufzeit per `dlopen`, zu
 finden über `TEASI_GEOS`. Der Build selbst braucht sie nicht. Eine Änderung ging zurück nach
 Python: `compile_osmarea.py` sortiert die Flächen jetzt nach ihrer osmium-Id, denn die

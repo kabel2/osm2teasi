@@ -246,6 +246,30 @@ die Stückliste teilen, kopieren sie und brauchen zusammen über 28 GB.
    - Typ 1: britische Postleitzahlbezirke (Outward Code, z. B. `SW1A`) mit ihren Straßen.
    - Namen stehen inline (ohne Wortpool), alle Sprachmasken voll, Sprachliste wie DK.
 
+### In Rust
+
+`rust/src/ta.rs` macht dasselbe ohne Pickle, mit `rust/src/grid.rs` statt scipys
+`cKDTree`; siehe [../rust/README.md](../rust/README.md).
+
+```bash
+./target/release/teasi ta --country=17 "--name=United Kingdom" \
+    osm_ref/great-britain-latest.osm.pbf osm_ref/great-britain.poly \
+    build/gb/GreatBritain_ta.v20260919 20260919      # 3:19, 13,7 GB
+```
+
+Für Dänemark sind **alle 3958 Records und der Suchindex bytegleich** mit der
+Python-Version, für Großbritannien 13.679 von 13.680 Records und beide Dateien auf das
+Byte gleich groß; die eine Abweichung und 9 von 522.760 Index-Knoten gehen auf die
+zwei Adressen zurück, die der Rust-Extraktor zusätzlich findet.
+
+Drei Dinge mussten dafür auch in `compile_ta.py` geändert werden, damit zwei Läufe
+überhaupt dasselbe liefern: Adressen, Orte und Interpolationslinien werden kanonisch
+sortiert (der Extraktor liefert libosmiums Reihenfolge), die Kinder eines
+Suchindex-Knotens nach Zeichen (vorher die Iterationsreihenfolge eines `set` — die
+wechselt mit dem Hash-Seed), und eine Korrelation unter 10⁻¹² gilt als null
+(`CORR_TOL`), statt mit ihrem letzten Bit über die Richtung eines
+Hausnummernbereichs zu entscheiden.
+
 **Abgleich an Dänemark:** Aus `denmark-220101` gebaut: 22,6 MB (Original 22,2 MB). An 3000
 zufälligen OSM-Adressen mit der Firmware-Logik (`ta_lookup.py`) nachgeschlagen:
 

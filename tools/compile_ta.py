@@ -69,6 +69,7 @@ MAX_ALTS = 12                    # place names per street group
 MAX_CITIES = 3                   # addr:city values per street ...
 CITY_SHARE = 0.25                # ... with at least this share of its addresses
 ALT_SHARE = 0.1                  # places of a street: at least this share of its length
+CORR_TOL = 1e-12                 # a correlation this small carries no direction
 OTHER_PLACES = {"locality", "isolated_dwelling", "farm", "island", "islet"}
 M_PER_UNIT = 2 * math.pi * 6371000 / 2 ** 28          # N-S metres per unit
 LANGS = [("DAN", 1), ("GER", 2), ("ENG", 3), ("FIN", 4), ("FRE", 5), ("NOR", 6), ("SPA", 7),
@@ -283,7 +284,11 @@ def side_range(nums):
     ns = [n for _, n in nums]
     ts = [t for t, _ in nums]
     lo, hi = min(ns), max(ns)
-    up = len(ns) < 2 or np.corrcoef(ts, ns)[0, 1] >= 0 if len(set(ts)) > 1 and lo != hi else True
+    # a correlation of 1e-17 is rounding noise, not a direction: with >= 0 the
+    # last bit of numpy's covariance would decide whether the range counts up
+    # or down (and no two implementations agree on that bit)
+    up = len(ns) < 2 or np.corrcoef(ts, ns)[0, 1] >= -CORR_TOL \
+        if len(set(ts)) > 1 and lo != hi else True
     a, b = (lo, hi) if up else (hi, lo)
     return (a | (0x8000 if mixed else 0)) | b << 16
 
@@ -484,9 +489,36 @@ def to_latlon(x, y):
     return 90 - y / SCALE, x / SCALE - 180
 
 
+def sort_extract(ad):
+    """Canonical order of the extractor's output.
+
+    osm_addr_extract.py appends in libosmium's order, and that order decides
+    `Counter` ties, the order of the index results and the summation order of
+    the postcode centres -- it is not reproducible (and the Rust extractor
+    reads the blocks in parallel).  Sorting makes the layer reproducible; the
+    data is the same, only assembled in a defined order."""
+    s = lambda v: v or ""
+    ad["addr"].sort(key=lambda a: (a[0], a[1], *[s(v) for v in a[2:8]]))
+    ad["places"].sort(key=lambda p: (p[0], p[1], s(p[2]), s(p[3])))
+    ad.setdefault("interp", [])
+    ad["interp"].sort(key=lambda i: (i[1][0][0], i[1][0][1], i[1][-1][0], i[1][-1][1],
+                                     s(i[0]), s(i[2]), len(i[1])))
+
+
+def sort_kids(nd):
+    """Children of a search index node in character order.
+
+    They used to be appended in the iteration order of a `set` of strings,
+    which changes with the hash seed from run to run."""
+    nd["kids"].sort(key=lambda k: k[0])
+    for _, _, kid in nd["kids"]:
+        sort_kids(kid)
+
+
 def build(ext, ad, P, date, country=17, cname="United Kingdom", cache=None):
     """ext: function returning the road pickle (only called without a valid cache)."""
     t0 = time.time()
+    sort_extract(ad)
     Pb = P.buffer(CELL)
     shapely.prepare(Pb)
     memo = {}
@@ -607,6 +639,7 @@ def build(ext, ad, P, date, country=17, cname="United Kingdom", cache=None):
                     nd["kids"].append(nxt)
                 nd = nxt[2]
             nd["res"].append(r)
+    sort_kids(root)
     index = ta_index.build({"langs": LANGS, "one": 1, "country": cname, "root": root,
                             "pool": {}})
     log(f"index {len(index)} B ({time.time() - t0:.0f} s)")

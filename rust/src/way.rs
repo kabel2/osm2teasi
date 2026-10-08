@@ -89,7 +89,7 @@ fn block(acc: &mut Acc, b: &PrimitiveBlock) {
 }
 
 /// Read the ways, then the coordinates of their nodes.
-pub fn extract(path: &str, log: &dyn Fn(String)) -> Result<Ways> {
+pub fn extract(path: &str, log: &dyn Fn(&str)) -> Result<Ways> {
     let mut acc = par_blocks(path, Acc::default, block, |mut a: Acc, b: Acc| {
         a.ways.extend(b.ways);
         a.rels.extend(b.rels);
@@ -104,7 +104,7 @@ pub fn extract(path: &str, log: &dyn Fn(String)) -> Result<Ways> {
     for (id, v) in acc.rels {
         rels.entry(id).or_default().push(v);
     }
-    log(format!(
+    log(&format!(
         "{} ways, {} ways in routes",
         acc.ways.len(),
         rels.len()
@@ -115,7 +115,7 @@ pub fn extract(path: &str, log: &dyn Fn(String)) -> Result<Ways> {
     ids.dedup();
     let mut index = NodeIndex::new(ids);
     index.fill(path)?;
-    log(format!(
+    log(&format!(
         "{} way nodes, {} without coordinates",
         index.len(),
         index.missing()

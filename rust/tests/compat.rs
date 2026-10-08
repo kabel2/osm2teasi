@@ -784,3 +784,101 @@ fn name_table_matches_python() {
     assert_eq!(index["\u{d8}ster All\u{e9}"], 4);
     assert_eq!(index["\u{d8}ster Vej"], 12);
 }
+
+// --------------------------------------------------------------------------
+// the ta layer: house numbers, postcodes, cell cutting and the index keys
+// --------------------------------------------------------------------------
+
+/// Values from tools/compile_ta.py.
+#[test]
+fn house_numbers_match_python() {
+    use teasi::ta::house_numbers;
+    let cases: [(&str, &[i64]); 13] = [
+        ("12", &[12]),
+        (" 12a ", &[12]),
+        ("12-16", &[12, 16]),
+        ("12a - 16b", &[12, 16]),
+        ("7/9", &[7, 9]),
+        ("Flat 3", &[]),
+        ("", &[]),
+        ("12abc", &[]),
+        ("0", &[0]),
+        ("1A", &[1]),
+        ("12 \u{2013} 14", &[12, 14]),
+        ("99999", &[99999]),
+        ("12b", &[12]),
+    ];
+    for (s, want) in cases {
+        assert_eq!(house_numbers(s), want, "house numbers of {:?}", s);
+    }
+}
+
+#[test]
+fn outward_codes_match_python() {
+    use teasi::ta::outward;
+    let cases: [(&str, Option<&str>); 10] = [
+        ("SW1A 1AA", Some("SW1A")),
+        ("sw1a1aa", Some("SW1A")),
+        ("E1 3AB", Some("E1")),
+        ("E12 3AB", Some("E12")),
+        ("A1 2BC", Some("A1")),
+        ("AB12 3CD", Some("AB12")),
+        ("ABC1 2DE", None),
+        ("SW1A", None),
+        ("12345", None),
+        ("N1 9GU", Some("N1")),
+    ];
+    for (s, want) in cases {
+        assert_eq!(outward(s).as_deref(), want, "outward code of {:?}", s);
+    }
+}
+
+#[test]
+fn split_cells_matches_python() {
+    let r = teasi::ta::split_cells(&[(32700.0, 100.0), (33000.0, 200.0), (65600.0, 300.0)]);
+    let cells: Vec<(i64, i64)> = r.iter().map(|(c, _)| *c).collect();
+    assert_eq!(cells, vec![(0, 0), (1, 0), (2, 0)]);
+    assert_eq!(r[0].1.len(), 2);
+    assert_eq!(r[1].1.len(), 3);
+    // the crossing point is shared by both parts
+    assert_eq!(r[0].1[1], r[1].1[0]);
+    assert_eq!(r[1].1[2], r[2].1[0]);
+    assert!((r[0].1[1].1 - 122.666667).abs() < 1e-6);
+    assert!((r[1].1[2].1 - 299.803681).abs() < 1e-6);
+}
+
+#[test]
+fn side_ranges_match_python() {
+    use teasi::ta::side_range;
+    let cases: [(&[(f64, i64)], u32); 7] = [
+        (&[], 0xFFFF_7FFF),
+        (&[(0.1, 12)], 0xC000C),
+        (&[(0.1, 12), (0.9, 24)], 0x18000C),
+        (&[(0.9, 12), (0.1, 24)], 0xC0018),
+        // one odd number among three even ones is more than 10 %: bit 15
+        (&[(0.1, 2), (0.5, 4), (0.9, 6), (0.3, 7)], 0x78002),
+        (&[(0.1, 2), (0.5, 4), (0.9, 6), (0.3, 7), (0.4, 9), (0.6, 11)], 0xB8002),
+        // all at the same position: ascending
+        (&[(0.5, 10), (0.5, 20)], 0x14000A),
+    ];
+    for (nums, want) in cases {
+        assert_eq!(side_range(&mut nums.to_vec()), want, "side range of {:?}", nums);
+    }
+}
+
+#[test]
+fn index_keys_match_python() {
+    assert_eq!(teasi::ta_index::fold("K\u{f8}benhavn"), "kobenhavn");
+    assert_eq!(teasi::ta_index::fold("\u{c6}r\u{f8}skobing"), "aroskobing");
+    assert_eq!(teasi::ta_index::fold("Stra\u{df}e"), "strasse");
+    assert_eq!(teasi::ta_index::fold("\u{c5}RHUS"), "arhus");
+    assert_eq!(teasi::ta_index::fold("Mal\u{f6}"), "malo");
+    assert_eq!(teasi::ta::keys("K\u{f8}benhavn, N\u{f8}rrebro"), ["kobenhavn", "norrebro"]);
+    assert_eq!(teasi::ta::keys("King's Lynn"), ["kings", "kings lynn", "lynn"]);
+    assert_eq!(
+        teasi::ta::keys("Stoke-on-Trent"),
+        ["on", "stoke", "stoke on trent", "trent"]
+    );
+    assert_eq!(teasi::ta::keys("SW1A"), ["sw1a"]);
+    assert_eq!(teasi::ta::keys("\u{c5}rhus"), ["arhus"]);
+}
