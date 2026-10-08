@@ -41,11 +41,6 @@ ghidra_scripts/   headless scripts for analysing the firmware in Ghidra
 One binary, `teasi`, with a subcommand per job — [rust/README.md](rust/README.md) describes
 them all. No other runtime and no build step beyond `cargo build`.
 
-This started as a Python implementation and was then ported to Rust, module by module, each
-step checked against the Python output record by record. That reference was removed once the
-port was complete and every layer agreed; it is in the history up to commit `fc17505`,
-together with the comparison scripts that drove it.
-
 ## Getting started
 
 ```bash
@@ -106,8 +101,7 @@ Address extraction for Denmark takes 4.7 s for all 2,628,399 entries, the osmpoi
 Great Britain 35 s. The street layer for Great Britain takes 4:13 from the 2.2 GB PBF
 straight into the 531 MB chart file, the terrain layer 1:24 including reading the PBF and
 the land polygon shapefile, and the elevation grid for the whole island 3.6 s from cached
-tiles. Details and the comparison against the Python reference in
-[rust/README.md](rust/README.md).
+tiles. Details in [rust/README.md](rust/README.md).
 
 ## What is not in here
 
