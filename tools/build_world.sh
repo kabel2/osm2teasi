@@ -23,11 +23,13 @@
 #                     ones, where fixed costs dominate.  A country with a large
 #                     area adds its elevation grid to the streets and the
 #                     terrain (China: 9.9 GB).
+#   REGION_TIMEOUT    seconds one region may take before it is given up,
+#                     default 6 hours, far above any region that finishes
+#   DATE              version date of the files, default today
 #
 # The region list is generated: `teasi regions > tools/regions.tsv` fetches
 # Geofabrik's index and maps it onto the firmware's country codes (see
 # rust/src/regions.rs for what is left out and why).
-#   DATE              version date of the files, default today
 set -u -o pipefail
 
 out=${1:?usage: build_world.sh <out dir> [region pattern]}
@@ -94,7 +96,7 @@ while IFS=$'\t' read -r continent region code country prefix; do
     fi
 
     rm -rf "$stage"
-    if ! "$teasi" all --generic --country="$code" --tiles="$tiles" \
+    if ! timeout "${REGION_TIMEOUT:-21600}" "$teasi" all --generic --country="$code" --tiles="$tiles" \
             ${land:+--land="$land"} "$pbf" "$poly" "$stage" "$date" \
             > "$work/$name.log" 2>&1; then
         echo "    build failed, see $work/$name.log"
@@ -120,7 +122,7 @@ while IFS=$'\t' read -r continent region code country prefix; do
         [ -z "$shared" ] || echo "NOTE: this region$shared, so only one of them at a time."
         echo
         echo "Built from $base/$region-latest.osm.pbf with"
-        echo "https://github.com/<repo>/teasi-maps -- map data (c) OpenStreetMap"
+        echo "https://github.com/kabel2/osm2teasi -- map data (c) OpenStreetMap"
         echo "contributors, ODbL 1.0, elevation from Copernicus DEM GLO-90."
         echo
         (cd "$stage" && for f in *.v*; do printf '%s  %s bytes  md5 %s\n' \
