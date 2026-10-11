@@ -61,7 +61,8 @@ Edge or another Chromium-based browser on a computer (not on a phone).</div>
 <div id="job"><p class="mute">Nothing running.</p></div>
 
 <p class="mute" style="margin-top:32px">Downloads share 10&nbsp;Mbit/s, so a big country takes a
-while (Germany, 1.5&nbsp;GB: about 20 minutes). Keep this tab open until it says done, then eject
+while (Germany, 1.5&nbsp;GB: about 20 minutes). Keep this tab open and in front until it says done (then the computer does not go
+to sleep, but closing the lid still sends it), then eject
 the drive before you unplug the Teasi. Map data © OpenStreetMap contributors, ODbL 1.0; elevation
 Copernicus DEM GLO-90. Not affiliated with the maker of the Teasi. <a href="/">Download page</a> · <a href="/maps/">All files</a></p>
 
@@ -199,7 +200,8 @@ async function run(files, size, label, open) {
   const lines = [], t0 = Date.now();
   let got = 0, last = 0, lock = null;
   job('<p>Installing <b>' + esc(prefix.replace(/_/g, ' ')) + '</b>…</p><progress id="bar" max="' + size +
-      '" value="0"></progress><div id="stat" class="mute"></div><div id="log"></div>');
+      '" value="0"></progress><div id="stat" class="mute"></div><div id="wake" class="mute"></div>' +
+      '<div id="log"></div>');
   const log = s => { lines.push(s); $('log').textContent = lines.join('\n'); $('log').scrollTop = 1e9; };
   const tick = n => {
     got += n;
@@ -212,7 +214,16 @@ async function run(files, size, label, open) {
                             (left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s') + ' left';
   };
   window.onbeforeunload = () => 'The map is still being written.';
-  try { lock = await navigator.wakeLock?.request('screen'); } catch {}
+  // keeps the computer awake; the browser drops the lock whenever the tab is hidden,
+  // so take it again each time the tab comes back
+  const awake = async () => {
+    if (document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+    try { lock = await navigator.wakeLock.request('screen'); } catch { lock = null; }
+    $('wake').textContent = lock ? 'This computer is kept awake while this tab is in front.'
+                                 : 'This browser cannot keep the computer awake: stop it from sleeping yourself.';
+  };
+  document.addEventListener('visibilitychange', awake);
+  await awake();
   try {
     await install(dev, await open(), prefix, log, tick);
     $('bar').value = size;
@@ -225,7 +236,9 @@ async function run(files, size, label, open) {
   } finally {
     busy = false;
     window.onbeforeunload = null;
+    document.removeEventListener('visibilitychange', awake);
     lock?.release().catch(() => {});
+    $('wake').textContent = '';
     await showDevice().catch(() => {});
   }
 }
