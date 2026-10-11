@@ -62,7 +62,9 @@ Edge or another Chromium-based browser on a computer (not on a phone).</div>
 
 <p class="mute" style="margin-top:32px">Downloads share 10&nbsp;Mbit/s, so a big country takes a
 while (Germany, 1.5&nbsp;GB: about 20 minutes). Keep this tab open and in front until it says done (then the computer does not go
-to sleep, but closing the lid still sends it), then eject
+to sleep, but closing the lid still sends it). If the connection breaks or the computer sleeps, it
+goes on by itself once it is back; if the tab was closed, choose the same map again and it goes on
+with the next file. Then eject
 the drive before you unplug the Teasi. Map data © OpenStreetMap contributors, ODbL 1.0; elevation
 Copernicus DEM GLO-90. Not affiliated with the maker of the Teasi. <a href="/">Download page</a> · <a href="/maps/">All files</a></p>
 
@@ -159,18 +161,24 @@ $('q').addEventListener('input', showList);
 
 function job(html) { $('job').innerHTML = html; }
 
+// Read the zip by range from the server.  If-Range with the ETag makes sure a
+// request that continues after a break reads the same zip as the first one.
 async function fromServer(url) {
   if (busy) return;
   try {
-    const r = await fetch(url, {headers: {Range: 'bytes=-65536'}});
-    const range = r.headers.get('Content-Range');
+    const r = await fetch(url, {headers: {Range: 'bytes=-65536'}, cache: 'no-store'});
+    const range = r.headers.get('Content-Range'), etag = r.headers.get('ETag') || '';
     if (r.status !== 206 || !range) throw new Error('the server did not answer the range request');
     const size = +range.split('/')[1];
     const files = centralDirectory(new Uint8Array(await r.arrayBuffer()), size);
-    await run(files, size, url.split('/').pop(), async () => {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error('download failed: HTTP ' + resp.status);
-      return resp.body;
+    await run(files, url.split('/').pop(), url + '|' + etag + '|' + size, async (pos, end) => {
+      const resp = await fetch(url, {cache: 'no-store',
+        headers: {Range: 'bytes=' + pos + '-' + (end - 1), ...(etag && {'If-Range': etag})}});
+      if (resp.status === 206) return resp.body;
+      resp.body?.cancel();
+      if (resp.status === 200) throw Object.assign(new Error('the map on the server changed meanwhile'), {stale: true});
+      throw Object.assign(new Error('the server answered HTTP ' + resp.status),
+                          {retry: resp.status >= 500 || resp.status === 408 || resp.status === 429});
     });
   } catch (e) { job('<p class="bad">' + esc(e.message) + '</p>'); }
 }
@@ -182,37 +190,71 @@ $('zip').onchange = async () => {
   if (!dev) { job('<p class="bad">Choose the Teasi first (step 1).</p>'); return; }
   try {
     const files = centralDirectory(new Uint8Array(await f.slice(-65536).arrayBuffer()), f.size);
-    await run(files, f.size, f.name, async () => f.stream());
+    await run(files, f.name, 'file|' + f.name + '|' + f.size + '|' + f.lastModified,
+              async (pos, end) => f.slice(pos, end).stream());
   } catch (e) { job('<p class="bad">' + esc(e.message) + '</p>'); }
 };
 
-async function run(files, size, label, open) {
+// What an interrupted install had finished, so that the next one goes on from
+// there: {id, done: {name: {name, size, md5}}}, for one zip at a time.
+const MEMO = 'teasi-install';
+function recall(id) {
+  try { const m = JSON.parse(localStorage.getItem(MEMO)); return m && m.id === id ? m.done : {}; }
+  catch { return {}; }
+}
+function remember(id, done) { try { localStorage.setItem(MEMO, JSON.stringify({id, done})); } catch {} }
+function forget() { try { localStorage.removeItem(MEMO); } catch {} }
+
+const secs = s => s > 90 ? Math.round(s / 60) + ' min' : Math.round(s) + ' s';
+
+async function run(files, label, id, open) {
   const charts = files.filter(f => CHART.test(f.name));
   if (!charts.length) throw new Error(label + ' has no Teasi map files');
   const prefix = CHART.exec(charts[0].name)[1];
-  const old = await oldFiles(dev, prefix);
+  const done = recall(id), keep = await finished(dev, charts, done);
+  const old = (await oldFiles(dev, prefix)).filter(n => !keep[n]);
   const need = charts.reduce((n, f) => n + f.size, 0);
-  if (!confirm('Install ' + prefix.replace(/_/g, ' ') + ' (' + mb(need) + ') on the Teasi?' +
+  const have = charts.reduce((n, f) => n + (keep[f.name] ? f.size : 0), 0);
+  const kept = Object.keys(keep).length;
+  if (!confirm((kept ? 'Continue installing ' + prefix.replace(/_/g, ' ') + ': ' + kept + ' of ' + charts.length +
+                       ' files are on the Teasi already, ' + mb(need - have) + ' to go.'
+                     : 'Install ' + prefix.replace(/_/g, ' ') + ' (' + mb(need) + ') on the Teasi?') +
                (old.length ? '\n\nThis deletes the map that is there now:\n' + old.join('\n') : '') +
                '\n\nThe entries in packages.xml are updated; the first time, the original is kept as ' +
                'BikeNav/packages.orig.xml.')) return;
   busy = true;
-  const lines = [], t0 = Date.now();
+  const lines = [], t0 = Date.now(), recent = [];
   let got = 0, last = 0, lock = null;
-  job('<p>Installing <b>' + esc(prefix.replace(/_/g, ' ')) + '</b>…</p><progress id="bar" max="' + size +
-      '" value="0"></progress><div id="stat" class="mute"></div><div id="wake" class="mute"></div>' +
-      '<div id="log"></div>');
+  job('<p>Installing <b>' + esc(prefix.replace(/_/g, ' ')) + '</b>…</p><progress id="bar" max="' + need +
+      '" value="0"></progress><div id="stat" class="mute"></div><div id="wait" class="bad"></div>' +
+      '<div id="wake" class="mute"></div><div id="log"></div>');
   const log = s => { lines.push(s); $('log').textContent = lines.join('\n'); $('log').scrollTop = 1e9; };
-  const tick = n => {
+  // the rate over the last half minute, so that a pause does not linger in it
+  const onBytes = (n, skipped) => {
     got += n;
+    if (skipped) { for (const r of recent) r[1] += n; $('bar').value = got; return; }
     const now = Date.now();
     if (now - last < 250) return;
     last = now;
+    recent.push([now, got]);
+    while (recent.length > 2 && now - recent[0][0] > 30000) recent.shift();
     $('bar').value = got;
-    const rate = got / Math.max(1, (now - t0) / 1000), left = (size - got) / Math.max(rate, 1);
-    $('stat').textContent = mb(got) + ' of ' + mb(size) + ' · ' + (rate * 8 / 1e6).toFixed(1) + ' Mbit/s · ' +
-                            (left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s') + ' left';
+    const [t1, g1] = recent[0], rate = (got - g1) / Math.max(1, (now - t1) / 1000);
+    $('stat').textContent = mb(got) + ' of ' + mb(need) +
+      (rate > 0 && now - t1 > 2000 ? ' · ' + (rate * 8 / 1e6).toFixed(1) + ' Mbit/s · ' +
+                                     secs((need - got) / rate) + ' left' : '');
   };
+  // a broken connection: try again after a pause that grows to half a minute,
+  // or at once when the browser is back online; give up after about an hour
+  const wait = (attempt, e) => new Promise((ok, fail) => {
+    if (attempt > 120) return fail(new Error('no connection for an hour (' + e.message + ')'));
+    let left = [2, 5, 10, 20, 30][Math.min(attempt, 5) - 1];
+    const show = () => $('wait').textContent = 'Connection lost (' + e.message + '), trying again in ' + left + ' s…';
+    const go = () => { clearInterval(t); removeEventListener('online', go); $('wait').textContent = ''; ok(); };
+    const t = setInterval(() => --left <= 0 ? go() : show(), 1000);
+    addEventListener('online', go);
+    show();
+  });
   window.onbeforeunload = () => 'The map is still being written.';
   // keeps the computer awake; the browser drops the lock whenever the tab is hidden,
   // so take it again each time the tab comes back
@@ -225,20 +267,26 @@ async function run(files, size, label, open) {
   document.addEventListener('visibilitychange', awake);
   await awake();
   try {
-    await install(dev, await open(), prefix, log, tick);
-    $('bar').value = size;
-    $('stat').innerHTML = '<span class="ok">Done in ' + Math.round((Date.now() - t0) / 1000) +
-                          ' s. Eject the drive, unplug the Teasi and start it.</span>';
+    await install(dev, open, files, prefix, {log, onBytes, wait, done,
+                                             save: d => remember(id, d)});
+    forget();
+    $('bar').value = need;
+    $('stat').innerHTML = '<span class="ok">Done in ' + secs((Date.now() - t0) / 1000) +
+                          '. Eject the drive, unplug the Teasi and start it.</span>';
   } catch (e) {
+    if (e.stale) forget();
     log('failed: ' + e.message);
-    $('stat').innerHTML = '<span class="bad">Failed: ' + esc(e.message) +
-      '. If the drive is full, remove another map above and try again.</span>';
+    $('stat').innerHTML = '<span class="bad">Failed: ' + esc(e.message) + '. ' +
+      (e.stale ? 'Choose the map again to start over.'
+               : 'Choose the same map again and it goes on where it stopped; if the drive is full, ' +
+                 'remove another map above first.') + '</span>';
   } finally {
     busy = false;
     window.onbeforeunload = null;
     document.removeEventListener('visibilitychange', awake);
     lock?.release().catch(() => {});
     $('wake').textContent = '';
+    $('wait').textContent = '';
     await showDevice().catch(() => {});
   }
 }

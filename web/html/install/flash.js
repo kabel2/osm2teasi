@@ -71,7 +71,7 @@ function concat(...parts) {
 
 // ---- zip ----------------------------------------------------------------
 // build_world.sh writes stored zips (zip -0) with the sizes in the local
-// headers, so a zip can be written to the device while it downloads.
+// headers, so each file can be read straight out of the zip by its offset.
 
 // The file list from the central directory, given the last bytes of the zip.
 function centralDirectory(tail, zipSize) {
@@ -86,68 +86,62 @@ function centralDirectory(tail, zipSize) {
   const files = [];
   for (let i = 0; i < count; i++) {
     if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('broken central directory');
+    const method = dv.getUint16(p + 10, true), crc = dv.getUint32(p + 16, true);
     const size = dv.getUint32(p + 24, true), nlen = dv.getUint16(p + 28, true);
     const xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
-    files.push({name: new TextDecoder().decode(tail.subarray(p + 46, p + 46 + nlen)), size});
+    const offset = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(tail.subarray(p + 46, p + 46 + nlen));
+    if (method !== 0) throw new Error(name + ': compressed, expected a stored zip');
+    if (size === 0xffffffff || offset === 0xffffffff) throw new Error('zip64 is not supported');
+    files.push({name, size, crc, offset});
     p += 46 + nlen + xlen + clen;
   }
   return files;
 }
 
-class Reader {
-  constructor(stream, onBytes) {
-    this.r = stream.getReader(); this.buf = new Uint8Array(0); this.done = false;
-    this.onBytes = onBytes || (() => {});
-  }
-  async fill(n) {
-    while (this.buf.length < n && !this.done) {
-      const {value, done} = await this.r.read();
-      if (done) this.done = true;
-      else { this.buf = this.buf.length ? concat(this.buf, value) : value; }
+// A broken connection, as opposed to a broken zip or device: worth trying again.
+const retryable = e => e instanceof TypeError || e.retry;
+
+// Bytes [start, end) of the zip as chunks.  `open(pos, end)` gives a stream
+// from pos; when the connection breaks, `wait(attempt, error)` pauses (or
+// throws to give up) and the stream is opened again where it stopped.
+async function* bytes(open, start, end, wait) {
+  let pos = start, attempt = 0;
+  while (pos < end) {
+    let r = null;
+    try {
+      r = (await open(pos, end)).getReader();
+      for (;;) {
+        const {value, done} = await r.read();
+        if (done) break;
+        const c = value.length > end - pos ? value.subarray(0, end - pos) : value;
+        pos += c.length;
+        attempt = 0;
+        yield c;
+        if (pos >= end) break;
+      }
+      if (pos < end) throw Object.assign(new Error('the download ended early'), {retry: true});
+    } catch (e) {
+      if (!retryable(e)) throw e;
+      await wait(++attempt, e);
+    } finally {
+      r?.cancel().catch(() => {});
     }
-    return this.buf.length >= n;
   }
-  async take(n) {
-    if (!await this.fill(n)) throw new Error('the zip ends early');
-    const out = this.buf.slice(0, n);
-    this.buf = this.buf.subarray(n);
-    this.onBytes(n);
-    return out;
-  }
-  async piece(max) {
-    if (!this.buf.length && !await this.fill(1)) throw new Error('the zip ends early');
-    const k = Math.min(max, this.buf.length), out = this.buf.subarray(0, k);
-    this.buf = this.buf.subarray(k);
-    this.onBytes(k);
-    return out;
-  }
-  cancel() { this.r.cancel().catch(() => {}); }
 }
 
-// The entries in order; each one has next() for its data, which the loop
-// drains if the caller does not.
-async function* entries(reader) {
-  for (;;) {
-    const sig = new DataView((await reader.take(4)).buffer).getUint32(0, true);
-    if (sig === 0x02014b50 || sig === 0x06054b50) return;
-    if (sig !== 0x04034b50) throw new Error('not a zip file');
-    const h = await reader.take(26), v = new DataView(h.buffer);
-    const flags = v.getUint16(2, true), method = v.getUint16(4, true), crc = v.getUint32(10, true);
-    const size = v.getUint32(14, true), nlen = v.getUint16(22, true), xlen = v.getUint16(24, true);
-    const name = new TextDecoder().decode(await reader.take(nlen));
-    await reader.take(xlen);
-    if (flags & 8 || size === 0xffffffff) throw new Error(name + ': sizes not in the header');
-    if (method !== 0) throw new Error(name + ': compressed, expected a stored zip');
-    const e = {name, size, crc, left: size};
-    e.next = async () => {
-      if (!e.left) return null;
-      const c = await reader.piece(e.left);
-      e.left -= c.length;
-      return c;
-    };
-    yield e;
-    while (await e.next()) {}
-  }
+async function readAll(open, start, end, wait) {
+  const parts = [];
+  for await (const c of bytes(open, start, end, wait)) parts.push(c.slice());
+  return concat(...parts);
+}
+
+// Where the data of a file starts: after its local header, whose extra field
+// need not match the central directory's.
+async function dataStart(open, f, wait) {
+  const h = await readAll(open, f.offset, f.offset + 30, wait), v = new DataView(h.buffer);
+  if (v.getUint32(0, true) !== 0x04034b50) throw new Error(f.name + ': no local header where expected');
+  return f.offset + 30 + v.getUint16(26, true) + v.getUint16(28, true);
 }
 
 // ---- the device ---------------------------------------------------------
@@ -247,48 +241,59 @@ async function removeMap(dev, prefix, log) {
   }
 }
 
-// Write the chart files of a zip stream into Countries.  `prefix` comes from
-// the central directory; its old files are deleted first, the device has no
-// room for two copies of a big country.
-async function install(dev, stream, prefix, log, onBytes) {
+// Write the chart files of a zip into Countries.  `open(pos, end)` reads the
+// zip from pos, `files` is its central directory.  Its old files are deleted
+// first, the device has no room for two copies of a big country -- except
+// those in `done`: written completely by an earlier, interrupted run of the
+// same zip.  `save(done)` is called after each file so that a later run can
+// go on from there; `wait` decides how long to wait out a broken connection.
+async function install(dev, open, files, prefix, {log, onBytes, wait, done = {}, save = () => {}}) {
+  const charts = files.filter(f => CHART.test(f.name));
+  for (const f of charts)
+    if (CHART.exec(f.name)[1] !== prefix) throw new Error(f.name + ' does not belong to ' + prefix);
+  const keep = await finished(dev, charts, done);
   const pk = await readText(dev.bikenav, 'packages.xml');
   if (pk && !await child(dev.bikenav, 'packages.orig.xml', 'file')) {
     await writeText(dev.bikenav, 'packages.orig.xml', pk.text);
     log('kept the original as BikeNav/packages.orig.xml');
   }
   for (const name of await oldFiles(dev, prefix)) {
+    if (keep[name]) continue;
     await dev.countries.removeEntry(name);
     log('deleted ' + name);
   }
-  const reader = new Reader(stream, onBytes), written = {};
-  try {
-    for await (const e of entries(reader)) {
-      const m = CHART.exec(e.name);
-      if (!m) continue;                         // README.txt
-      if (m[1] !== prefix) throw new Error(e.name + ' does not belong to ' + prefix);
-      const h = await dev.countries.getFileHandle(e.name, {create: true});
-      const w = await h.createWritable();
-      const sum = new PackageSum();
-      let crc = 0, batch = [], n = 0;
-      try {
-        for (let c; (c = await e.next());) {
-          crc = crc32(crc, c); sum.add(c);
-          batch.push(c); n += c.length;
-          if (n >= 4 << 20) { await w.write(concat(...batch)); batch = []; n = 0; }
-        }
-        if (n) await w.write(concat(...batch));
-        if ((crc >>> 0) !== e.crc) throw new Error(e.name + ': checksum mismatch, the download is damaged');
-        await w.close();
-      } catch (err) {
-        await w.abort().catch(() => {});
-        await dev.countries.removeEntry(e.name).catch(() => {});
-        throw err;
-      }
-      written[m[2].toLowerCase()] = {name: e.name, size: sum.size, md5: sum.md5()};
-      log('wrote ' + e.name);
+  const written = {};
+  for (const f of charts) {
+    const layer = CHART.exec(f.name)[2].toLowerCase();
+    if (keep[f.name]) {
+      written[layer] = keep[f.name];
+      onBytes(f.size, true);
+      log('already there: ' + f.name);
+      continue;
     }
-  } finally {
-    reader.cancel();
+    const start = await dataStart(open, f, wait);
+    const h = await dev.countries.getFileHandle(f.name, {create: true});
+    const w = await h.createWritable();
+    const sum = new PackageSum();
+    let crc = 0, batch = [], n = 0;
+    try {
+      for await (const c of bytes(open, start, start + f.size, wait)) {
+        crc = crc32(crc, c); sum.add(c);
+        batch.push(c.slice()); n += c.length;
+        onBytes(c.length);
+        if (n >= 4 << 20) { await w.write(concat(...batch)); batch = []; n = 0; }
+      }
+      if (n) await w.write(concat(...batch));
+      if ((crc >>> 0) !== f.crc) throw new Error(f.name + ': checksum mismatch, the download is damaged');
+      await w.close();
+    } catch (err) {
+      await w.abort().catch(() => {});
+      await dev.countries.removeEntry(f.name).catch(() => {});
+      throw err;
+    }
+    written[layer] = {name: f.name, size: sum.size, md5: sum.md5()};
+    save(Object.fromEntries(Object.values(written).map(x => [x.name, x])));
+    log('wrote ' + f.name);
   }
   if (pk) {
     const p = patchPackages(pk.text, prefix, written);
@@ -300,6 +305,18 @@ async function install(dev, stream, prefix, log, onBytes) {
   return written;
 }
 
+// The files of `done` ({name: {name, size, md5}}) that are on the device in
+// full.  The browser writes into a .crswap and renames it only on close,
+// which comes after the checksum, so a file with its own name is complete.
+async function finished(dev, charts, done) {
+  const keep = {};
+  for (const f of charts) {
+    const d = done[f.name], h = d && await child(dev.countries, f.name, 'file');
+    if (h && d.size === f.size && (await h.getFile()).size === f.size) keep[f.name] = d;
+  }
+  return keep;
+}
+
 if (typeof module !== 'undefined')
-  module.exports = {md5, crc32, PackageSum, centralDirectory, Reader, entries, openDevice, installedMaps,
-                    oldFiles, patchPackages, install, removeMap, CHART};
+  module.exports = {md5, crc32, PackageSum, centralDirectory, bytes, openDevice, installedMaps,
+                    oldFiles, patchPackages, install, finished, removeMap, CHART};
