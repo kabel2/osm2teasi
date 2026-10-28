@@ -197,6 +197,9 @@ async function oldFiles(dev, prefix) {
 }
 
 const OWN_ID = 9000000;   // <content> ids from here on are ours, not GPS Tuner's
+// the device takes the file name from behind the url's last '/': without
+// one it opens the folder itself and calls the maps not installed correctly
+const DIR = 'content/';
 const FILE = /[ \t]*<file>\s*<url>([^<]*?)([^/<]+)<\/url>[\s\S]*?<\/file>[ \t]*\r?\n?/g;
 const mine = (base, prefix) => { const m = CHART.exec(base); return m && m[1].toLowerCase() === prefix.toLowerCase() && m; };
 
@@ -236,7 +239,7 @@ function patchPackages(xml, prefix, written, orig = '') {
         const w = written[l];
         added.push(w.name);
         return i1 + '<file>' + nl +
-               i2 + '<url>' + (dirs[l] ?? Object.values(dirs)[0] ?? '') + w.name + '</url>' + nl +
+               i2 + '<url>' + (dirs[l] ?? Object.values(dirs)[0] ?? DIR) + w.name + '</url>' + nl +
                i2 + '<md5>' + w.md5 + '</md5>' + nl +
                i2 + '<size>' + w.size + '</size>' + nl +
                i2 + '<destination_path>%drive_0%/Bikenav/Map/Countries</destination_path>' + nl +
@@ -260,7 +263,7 @@ function patchPackages(xml, prefix, written, orig = '') {
       const files = missing.map(l => {
         const w = written[l];
         added.push(w.name);
-        return i1 + '<file>' + nl + i2 + '<url>' + w.name + '</url>' + nl +
+        return i1 + '<file>' + nl + i2 + '<url>' + DIR + w.name + '</url>' + nl +
                i2 + '<md5>' + w.md5 + '</md5>' + nl + i2 + '<size>' + w.size + '</size>' + nl +
                i2 + '<destination_path>%drive_0%/Bikenav/Map/Countries</destination_path>' + nl +
                i2 + '<offset>0</offset>' + nl + i1 + '</file>' + nl;

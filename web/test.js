@@ -147,14 +147,14 @@ function check(c, label) {
   console.log('ok Install puts ' + want.length + ' entries back');
 
   // the same, but packages.orig.xml was made after the Remove (older
-  // installer) or is missing: the url gets no folder
+  // installer) or is missing: the url gets the folder content/
   for (const orig of [removed, null]) {
     t = await device();
     t.bn.files.set('packages.xml', Buffer.from(removed));
     if (orig) t.bn.files.set('packages.orig.xml', Buffer.from(orig));
     await F.install(t.dev, flaky(Infinity), files, prefix, quiet);
     const x = text('packages.xml');
-    if (x.split('<file>').length - 1 !== charts.length + 1 || !x.includes('<url>' + charts[0].name + '</url>'))
+    if (x.split('<file>').length - 1 !== charts.length + 1 || !x.includes('<url>content/' + charts[0].name + '</url>'))
       throw new Error('entries not added: ' + x);
   }
   console.log('ok without the original folder');
@@ -168,7 +168,7 @@ function check(c, label) {
   const own = '   <content>\n    <id>9000000</id>\n    <description>' + prefix.replace(/_/g, ' ') +
     '</description>\n    <version>5130</version>\n    <icon_url>content/icon/flag/' + prefix + '.png</icon_url>\n' +
     Object.values(w2).sort((a, b) => a.name < b.name ? -1 : 1)
-      .map(w => entry('', w.name).replace('<md5>0', '<md5>' + w.md5).replace('<size>1', '<size>' + w.size)).join('') +
+      .map(w => entry('content/', w.name).replace('<md5>0', '<md5>' + w.md5).replace('<size>1', '<size>' + w.size)).join('') +
     '   </content>\n';
   if (text('packages.xml') !== none.replace('  </release>', own + '  </release>'))
     throw new Error('no <content> for a new map: ' + text('packages.xml'));
