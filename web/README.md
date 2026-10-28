@@ -25,7 +25,9 @@ back into it. A country the device never had gets a `<content>` of its own (id f
 in the first Map package, which Remove takes out again: the TAHUNA Tool calls every file in
 `Map/Countries` that `packages.xml` does not list unknown and wants to delete all maps.
 Remove takes out only the entries of an original country; the first change, by either, keeps
-the old file as `packages.orig.xml`. Without a server it works too: a zip
+the old file as `packages.orig.xml`. Files in `Map/Countries` that `packages.xml` does not
+list (left by an install that did not finish, or written by an older installer) are shown
+when the device is chosen: a complete map can be added to `packages.xml`, the rest removed. Without a server it works too: a zip
 downloaded beforehand can be picked from the disk.
 
 Big countries take a while at 10 Mbit/s, so it holds a wake lock while the tab is in front,

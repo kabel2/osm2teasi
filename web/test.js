@@ -10,7 +10,7 @@ class FileH {
   constructor(dir, name) { this.kind = 'file'; this.dir = dir; this.name = name; }
   async getFile() {
     const d = this.dir.files.get(this.name);
-    return {size: d.length, text: async () => Buffer.from(d).toString(),
+    return {size: d.length, text: async () => Buffer.from(d).toString(), slice: (a, b) => new Blob([d.subarray(a, b)]),
             arrayBuffer: async () => d.buffer.slice(d.byteOffset, d.byteOffset + d.length)};
   }
   async createWritable() {
@@ -175,6 +175,32 @@ function check(c, label) {
   await F.removeMap(t.dev, prefix, () => {});
   if (text('packages.xml') !== none) throw new Error('Remove left the new <content>: ' + text('packages.xml'));
   console.log('ok a new map gets its own <content>, Remove takes it out');
+
+  // files that packages.xml does not list: a complete map goes into it, what
+  // an unfinished install left goes with its map, a file of no map goes too
+  t = await device();
+  t.bn.files.set('packages.xml', Buffer.from(original));
+  const third = new Uint8Array(3000).map((_, i) => i * 7);
+  t.c.files.set('Third_osm.v20261008', third);
+  t.c.files.set(prefix + '_osm.v20261008', new Uint8Array(0));
+  t.c.files.set('notes.txt', new Uint8Array(2));
+  const odd = await F.unlisted(t.dev);
+  const json = JSON.stringify(odd, Object.keys(odd).sort().concat('files', 'broken'));
+  if (json !== JSON.stringify({'': {files: ['notes.txt'], broken: ['notes.txt']},
+                               [prefix]: {files: [prefix + '_ta.v20200101', prefix + '_osm.v20261008'],
+                                          broken: [prefix + '_osm.v20261008']},
+                               Third: {files: ['Third_osm.v20261008'], broken: []}}))
+    throw new Error('unlisted: ' + json);
+  await F.register(t.dev, 'Third', () => {});
+  const sum = new F.PackageSum(); sum.add(third);
+  if (!text('packages.xml').includes('<description>Third</description>') ||
+      !text('packages.xml').includes('<url>content/Third_osm.v20261008</url>\n     <md5>' + sum.md5() +
+                                     '</md5>\n     <size>3000</size>'))
+    throw new Error('register: ' + text('packages.xml'));
+  await F.removeMap(t.dev, prefix, () => {});
+  await F.removeFiles(t.dev, odd[''].files, () => {});
+  if (Object.keys(await F.unlisted(t.dev)).length) throw new Error('still unlisted: ' + JSON.stringify(await F.unlisted(t.dev)));
+  console.log('ok unlisted files: Third added, the unfinished ' + prefix + ' and notes.txt removed');
 
   // the zip changed on the server: stop, do not retry
   t = await device();

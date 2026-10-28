@@ -186,6 +186,51 @@ async function installedMaps(dev) {
   return maps;
 }
 
+// Files in Countries that packages.xml does not list: the device ignores them,
+// the TAHUNA Tool calls them unknown and offers to delete every map.  By map
+// prefix ('' for files of no map): {prefix: {files: [names], broken: [names]}}.
+// A broken file is empty or a .crswap, left by an install that did not finish
+// (the browser creates a file under its name before writing it); the others
+// were written in full, by an older installer for instance.
+async function unlisted(dev) {
+  const pk = await readText(dev.bikenav, 'packages.xml');
+  if (!pk) return {};
+  const listed = new Set([...pk.text.matchAll(FILE)].map(m => m[2]));
+  const out = {};
+  for await (const [name, h] of dev.countries.entries()) {
+    if (h.kind !== 'file' || listed.has(name)) continue;
+    const m = CHART.exec(name.replace(/\.crswap$/i, ''));
+    const e = out[m ? m[1] : ''] ||= {files: [], broken: []};
+    e.files.push(name);
+    if (!m || name !== m[0] || !(await h.getFile()).size) e.broken.push(name);
+  }
+  return out;
+}
+
+// Size and checksum of a file on the device, as packages.xml carries them.
+async function fileSum(h) {
+  const f = await h.getFile(), part = async (a, b) => new Uint8Array(await f.slice(a, b).arrayBuffer());
+  return {name: h.name, size: f.size, md5: md5(concat(await part(0x44, 0x444), await part(Math.max(0, f.size - 0x400))))};
+}
+
+// Put the files of a map that are on the device into packages.xml.
+async function register(dev, prefix, log) {
+  const written = {};
+  for (const name of await oldFiles(dev, prefix)) {
+    const m = CHART.exec(name);
+    if (!m || name !== m[0]) continue;
+    const l = m[2].toLowerCase();
+    if (!written[l] || written[l].name < name) written[l] = await fileSum(await dev.countries.getFileHandle(name));
+  }
+  const pk = await readText(dev.bikenav, 'packages.xml');
+  if (!pk || !Object.keys(written).length) return;
+  await backup(dev, pk, log);
+  const orig = await readText(dev.bikenav, 'packages.orig.xml');
+  const p = patchPackages(pk.text, prefix, written, orig ? orig.text : '');
+  await writeText(dev.bikenav, pk.handle.name, p.xml);
+  log('packages.xml: ' + p.changed.length + ' entries updated, ' + p.added.length + ' added');
+}
+
 // Leftovers of an earlier, interrupted write of the same map.
 async function oldFiles(dev, prefix) {
   const out = [];
@@ -320,6 +365,13 @@ async function removeMap(dev, prefix, log) {
   }
 }
 
+async function removeFiles(dev, names, log) {
+  for (const name of names) {
+    await dev.countries.removeEntry(name);
+    log('deleted ' + name);
+  }
+}
+
 // Write the chart files of a zip into Countries.  `open(pos, end)` reads the
 // zip from pos, `files` is its central directory.  Its old files are deleted
 // first, the device has no room for two copies of a big country -- except
@@ -397,4 +449,5 @@ async function finished(dev, charts, done) {
 
 if (typeof module !== 'undefined')
   module.exports = {md5, crc32, PackageSum, centralDirectory, bytes, openDevice, installedMaps,
-                    oldFiles, patchPackages, install, finished, removeMap, CHART};
+                    oldFiles, patchPackages, install, finished, removeMap, unlisted, register,
+                    removeFiles, CHART};

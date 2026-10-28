@@ -94,9 +94,44 @@ async function showDevice() {
          '</td><td class="n">' + mb(maps[n].bytes) + '</td><td class="b"><button data-rm="' + esc(n) +
          '">Remove</button></td></tr>';
   h += '</table>' + (names.length ? '' : '<p class="mute">No maps on the device.</p>') + '</div>';
+  const odd = await unlisted(dev), keys = Object.keys(odd).sort();
+  if (keys.length) {
+    h += '<div class="box"><b class="bad">Files that packages.xml does not list.</b> The Teasi ignores ' +
+         'them, but the TAHUNA Tool calls them unknown and offers to delete all maps: do not say OK ' +
+         'there.<table style="margin-top:8px">';
+    for (const p of keys) {
+      const e = odd[p], broken = e.broken.length;
+      h += '<tr><td>' + (p ? esc(p.replace(/_/g, ' ')) : esc(e.files.join(', '))) + '</td><td class="n">' +
+           (!p ? 'not map files' : broken ? 'install did not finish (' + broken + ' of ' + e.files.length +
+                 ' files empty), install it again to go on' : e.files.length + ' files, complete') +
+           '</td><td class="b">' + (p && !broken ? '<button data-reg="' + esc(p) + '">Add to packages.xml</button>'
+                                                 : '<button data-drop="' + esc(p) + '">Remove</button>') + '</td></tr>';
+    }
+    h += '</table></div>';
+  }
   $('device').innerHTML = h;
   for (const b of $('device').querySelectorAll('[data-rm]')) b.onclick = () => remove(b.dataset.rm);
+  for (const b of $('device').querySelectorAll('[data-reg]')) b.onclick = () => fix(b.dataset.reg, true, odd);
+  for (const b of $('device').querySelectorAll('[data-drop]')) b.onclick = () => fix(b.dataset.drop, false, odd);
   showList();
+}
+
+// Unlisted files: put a complete map into packages.xml, or remove what an
+// unfinished install left (the whole map) or what is no map at all.
+async function fix(prefix, add, odd) {
+  const what = prefix ? prefix.replace(/_/g, ' ') : odd[''].files.join(', ');
+  if (busy || !confirm(add ? 'Add ' + what + ' to BikeNav/packages.xml?'
+                           : 'Remove ' + what + ' from the Teasi?')) return;
+  busy = true;
+  const out = [];
+  try {
+    if (add) await register(dev, prefix, s => out.push(s));
+    else if (prefix) await removeMap(dev, prefix, s => out.push(s));
+    else await removeFiles(dev, odd[''].files, s => out.push(s));
+  } catch (e) { out.push('failed: ' + e.message); }
+  busy = false;
+  job('<p>' + (add ? 'Added ' : 'Removed ') + esc(what) + '.</p><div id="log">' + esc(out.join('\n')) + '</div>');
+  await showDevice();
 }
 
 $('pick').onclick = async () => {
