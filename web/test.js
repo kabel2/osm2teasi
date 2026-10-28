@@ -117,6 +117,54 @@ function check(c, label) {
   if ((await F.finished(t.dev, charts, memo))[k]) throw new Error('a short file was trusted');
   console.log('ok short file not trusted');
 
+  // an original map: Remove keeps the original packages.xml, Install puts the
+  // entries back into the country's <content>, with the folder from the original
+  const entry = (dir, name) => '    <file>\n     <url>' + dir + name + '</url>\n     <md5>0</md5>\n' +
+    '     <size>1</size>\n     <destination_path>%drive_0%/Bikenav/Map/Countries</destination_path>\n' +
+    '     <offset>0</offset>\n    </file>\n';
+  const block = (id, name, body) => '   <content>\n    <id>' + id + '</id>\n    <description>' + name +
+    '</description>\n    <version>5130</version>\n' + body + '   </content>\n';
+  const original = '<root>\n <package>\n  <type>Map</type>\n  <release>\n' +
+    block(1, prefix.replace(/_/g, ' '), entry('content/1/9/', prefix + '_osm.v20210916') +
+                                        entry('content/1/9/', prefix + '_osmpoint.v20210916')) +
+    block(2, 'Other', entry('content/1/8/', 'Other_osm.v20200101')) +
+    '  </release>\n </package>\n</root>\n';
+  t = await device();
+  const text = n => Buffer.from(t.bn.files.get(n)).toString();
+  t.bn.files.set('packages.xml', Buffer.from(original));
+  t.c.files.set(prefix + '_osm.v20210916', new Uint8Array(5));
+  await F.removeMap(t.dev, prefix, () => {});
+  const removed = text('packages.xml');
+  if (text('packages.orig.xml') !== original) throw new Error('Remove did not keep the original');
+  if (removed.includes(prefix + '_') || !removed.includes('Other_osm')) throw new Error('Remove: ' + removed);
+  console.log('ok Remove keeps packages.orig.xml');
+  const written = await F.install(t.dev, flaky(Infinity), files, prefix, quiet);
+  const want = Object.values(written).sort((a, b) => a.name < b.name ? -1 : 1)
+    .map(w => entry('content/1/9/', w.name).replace('<md5>0', '<md5>' + w.md5).replace('<size>1', '<size>' + w.size));
+  if (text('packages.xml') !== original.replace(/(<description>[^<]*<\/description>\n[^\n]*\n)[\s\S]*?(   <\/content>)/,
+                                                  '$1' + want.join('') + '$2'))
+    throw new Error('entries not put back: ' + text('packages.xml'));
+  console.log('ok Install puts ' + want.length + ' entries back');
+
+  // the same, but packages.orig.xml was made after the Remove (older
+  // installer) or is missing: the url gets no folder
+  for (const orig of [removed, null]) {
+    t = await device();
+    t.bn.files.set('packages.xml', Buffer.from(removed));
+    if (orig) t.bn.files.set('packages.orig.xml', Buffer.from(orig));
+    await F.install(t.dev, flaky(Infinity), files, prefix, quiet);
+    const x = text('packages.xml');
+    if (x.split('<file>').length - 1 !== charts.length + 1 || !x.includes('<url>' + charts[0].name + '</url>'))
+      throw new Error('entries not added: ' + x);
+  }
+  // a map the device never had gets no entries at all
+  t = await device();
+  const none = removed.replace(/<description>[^<]*<\/description>/, '<description>Elsewhere</description>');
+  t.bn.files.set('packages.xml', Buffer.from(none));
+  await F.install(t.dev, flaky(Infinity), files, prefix, quiet);
+  if (text('packages.xml') !== none) throw new Error('entries for a map without <content>: ' + text('packages.xml'));
+  console.log('ok without the original folder, and nothing for a map the device never had');
+
   // the zip changed on the server: stop, do not retry
   t = await device();
   const stale = async () => { throw Object.assign(new Error('changed'), {stale: true}); };

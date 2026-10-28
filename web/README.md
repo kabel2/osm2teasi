@@ -19,8 +19,10 @@ your domain into `nginx.conf` and the certificate's directory into `compose.yaml
 The installer needs Chrome or Edge (File System Access API) and https. It reads the zip's
 directory with one range request, then each map file by its offset: written straight onto
 the device and checked against its CRC. It deletes the older files of the same country and
-puts the new files into `BikeNav/packages.xml` where an original map was listed (the first
-time it keeps the old one as `packages.orig.xml`). Without a server it works too: a zip
+puts the new files into `BikeNav/packages.xml` where an original map was listed, also when
+Remove had taken its entries out before: the country's `<content>` stays, and the entries go
+back into it. Remove takes out only the entries; the first change, by either, keeps the old
+file as `packages.orig.xml`. Without a server it works too: a zip
 downloaded beforehand can be picked from the disk.
 
 Big countries take a while at 10 Mbit/s, so it holds a wake lock while the tab is in front,

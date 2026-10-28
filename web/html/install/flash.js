@@ -196,21 +196,64 @@ async function oldFiles(dev, prefix) {
   return out;
 }
 
+const FILE = /[ \t]*<file>\s*<url>([^<]*?)([^/<]+)<\/url>[\s\S]*?<\/file>[ \t]*\r?\n?/g;
+const mine = (base, prefix) => { const m = CHART.exec(base); return m && m[1].toLowerCase() === prefix.toLowerCase() && m; };
+
 // Point the entries of this map at the new files, drop the ones without a
 // new file.  Entries of other maps and of the software stay as they are.
-function patchPackages(xml, prefix, written) {
-  const changed = [], removed = [];
-  const out = xml.replace(/[ \t]*<file>\s*<url>([^<]*?)([^/<]+)<\/url>[\s\S]*?<\/file>[ \t]*\r?\n?/g, (blk, dir, base) => {
-    const m = CHART.exec(base);
-    if (!m || m[1].toLowerCase() !== prefix.toLowerCase()) return blk;
+// A country of the original maps keeps its <content> block when its files
+// were removed; new files of that country go back into it, with the folder
+// of the url taken from `orig` (packages.orig.xml) where it lists them.
+function patchPackages(xml, prefix, written, orig = '') {
+  const changed = [], removed = [], added = [], seen = new Set();
+  let out = xml.replace(FILE, (blk, dir, base) => {
+    const m = mine(base, prefix);
+    if (!m) return blk;
     const w = written[m[2].toLowerCase()];
     if (!w) { removed.push(base); return ''; }
-    changed.push(base);
+    changed.push(base); seen.add(m[2].toLowerCase());
     return blk.replace(base, w.name)
               .replace(/<md5>[^<]*<\/md5>/, '<md5>' + w.md5 + '</md5>')
               .replace(/<size>[^<]*<\/size>/, '<size>' + w.size + '</size>');
   });
-  return {xml: out, changed, removed};
+  const missing = Object.keys(written).filter(l => !seen.has(l)).sort();
+  if (missing.length) {
+    const dirs = {};
+    for (const [, dir, base] of (orig + '\n' + xml).matchAll(FILE)) {
+      const m = mine(base, prefix);
+      if (m) dirs[m[2].toLowerCase()] ??= dir;
+    }
+    const name = prefix.replace(/_/g, ' ').toLowerCase();
+    out = out.replace(/([ \t]*)<content>[\s\S]*?<\/content>/g, (blk, ind) => {
+      if (added.length) return blk;
+      const d = /<description>([^<]*)<\/description>/.exec(blk);
+      const ours = (d && d[1].trim().toLowerCase() === name) ||
+                   [...blk.matchAll(FILE)].some(([, , base]) => mine(base, prefix));
+      if (!ours) return blk;
+      const nl = xml.includes('\r\n') ? '\r\n' : '\n', i1 = ind + ' ', i2 = ind + '  ';
+      const files = missing.map(l => {
+        const w = written[l];
+        added.push(w.name);
+        return i1 + '<file>' + nl +
+               i2 + '<url>' + (dirs[l] ?? Object.values(dirs)[0] ?? '') + w.name + '</url>' + nl +
+               i2 + '<md5>' + w.md5 + '</md5>' + nl +
+               i2 + '<size>' + w.size + '</size>' + nl +
+               i2 + '<destination_path>%drive_0%/Bikenav/Map/Countries</destination_path>' + nl +
+               i2 + '<offset>0</offset>' + nl +
+               i1 + '</file>' + nl;
+      }).join('');
+      return blk.replace(/[ \t]*<\/content>$/, files + ind + '</content>');
+    });
+  }
+  return {xml: out, changed, removed, added};
+}
+
+// The first change to packages.xml keeps the original next to it.
+async function backup(dev, pk, log) {
+  if (pk && !await child(dev.bikenav, 'packages.orig.xml', 'file')) {
+    await writeText(dev.bikenav, 'packages.orig.xml', pk.text);
+    log('kept the original as BikeNav/packages.orig.xml');
+  }
 }
 
 async function readText(dir, name) {
@@ -235,6 +278,7 @@ async function removeMap(dev, prefix, log) {
   if (pk) {
     const p = patchPackages(pk.text, prefix, {});
     if (p.removed.length) {
+      await backup(dev, pk, log);
       await writeText(dev.bikenav, pk.handle.name, p.xml);
       log('packages.xml: removed ' + p.removed.length + ' entries');
     }
@@ -253,10 +297,7 @@ async function install(dev, open, files, prefix, {log, onBytes, wait, done = {},
     if (CHART.exec(f.name)[1] !== prefix) throw new Error(f.name + ' does not belong to ' + prefix);
   const keep = await finished(dev, charts, done);
   const pk = await readText(dev.bikenav, 'packages.xml');
-  if (pk && !await child(dev.bikenav, 'packages.orig.xml', 'file')) {
-    await writeText(dev.bikenav, 'packages.orig.xml', pk.text);
-    log('kept the original as BikeNav/packages.orig.xml');
-  }
+  await backup(dev, pk, log);
   for (const name of await oldFiles(dev, prefix)) {
     if (keep[name]) continue;
     await dev.countries.removeEntry(name);
@@ -296,10 +337,12 @@ async function install(dev, open, files, prefix, {log, onBytes, wait, done = {},
     log('wrote ' + f.name);
   }
   if (pk) {
-    const p = patchPackages(pk.text, prefix, written);
-    if (p.changed.length || p.removed.length) {
+    const orig = await readText(dev.bikenav, 'packages.orig.xml');
+    const p = patchPackages(pk.text, prefix, written, orig ? orig.text : '');
+    if (p.changed.length || p.removed.length || p.added.length) {
       await writeText(dev.bikenav, pk.handle.name, p.xml);
-      log('packages.xml: ' + p.changed.length + ' entries updated, ' + p.removed.length + ' removed');
+      log('packages.xml: ' + p.changed.length + ' entries updated, ' + p.added.length + ' added, ' +
+          p.removed.length + ' removed');
     }
   }
   return written;
