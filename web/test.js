@@ -157,13 +157,24 @@ function check(c, label) {
     if (x.split('<file>').length - 1 !== charts.length + 1 || !x.includes('<url>' + charts[0].name + '</url>'))
       throw new Error('entries not added: ' + x);
   }
-  // a map the device never had gets no entries at all
+  console.log('ok without the original folder');
+
+  // a map the device never had gets a <content> of its own after the last
+  // one of the Map package, and Remove takes it out again
   t = await device();
   const none = removed.replace(/<description>[^<]*<\/description>/, '<description>Elsewhere</description>');
   t.bn.files.set('packages.xml', Buffer.from(none));
-  await F.install(t.dev, flaky(Infinity), files, prefix, quiet);
-  if (text('packages.xml') !== none) throw new Error('entries for a map without <content>: ' + text('packages.xml'));
-  console.log('ok without the original folder, and nothing for a map the device never had');
+  const w2 = await F.install(t.dev, flaky(Infinity), files, prefix, quiet);
+  const own = '   <content>\n    <id>9000000</id>\n    <description>' + prefix.replace(/_/g, ' ') +
+    '</description>\n    <version>5130</version>\n    <icon_url>content/icon/flag/' + prefix + '.png</icon_url>\n' +
+    Object.values(w2).sort((a, b) => a.name < b.name ? -1 : 1)
+      .map(w => entry('', w.name).replace('<md5>0', '<md5>' + w.md5).replace('<size>1', '<size>' + w.size)).join('') +
+    '   </content>\n';
+  if (text('packages.xml') !== none.replace('  </release>', own + '  </release>'))
+    throw new Error('no <content> for a new map: ' + text('packages.xml'));
+  await F.removeMap(t.dev, prefix, () => {});
+  if (text('packages.xml') !== none) throw new Error('Remove left the new <content>: ' + text('packages.xml'));
+  console.log('ok a new map gets its own <content>, Remove takes it out');
 
   // the zip changed on the server: stop, do not retry
   t = await device();

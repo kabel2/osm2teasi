@@ -196,6 +196,7 @@ async function oldFiles(dev, prefix) {
   return out;
 }
 
+const OWN_ID = 9000000;   // <content> ids from here on are ours, not GPS Tuner's
 const FILE = /[ \t]*<file>\s*<url>([^<]*?)([^/<]+)<\/url>[\s\S]*?<\/file>[ \t]*\r?\n?/g;
 const mine = (base, prefix) => { const m = CHART.exec(base); return m && m[1].toLowerCase() === prefix.toLowerCase() && m; };
 
@@ -244,7 +245,38 @@ function patchPackages(xml, prefix, written, orig = '') {
       }).join('');
       return blk.replace(/[ \t]*<\/content>$/, files + ind + '</content>');
     });
+    // a country the device never had gets a <content> of its own in the
+    // first Map package: the TAHUNA Tool calls every file in Countries that
+    // packages.xml does not list unknown and wants to delete all maps
+    if (!added.length) out = out.replace(/<package>[\s\S]*?<\/package>/g, pkg => {
+      const rel = /<type>Map<\/type>[\s\S]*?\n([ \t]*)<release>[\s\S]*?(\n[ \t]*<\/release>)/.exec(pkg);
+      if (added.length || !rel) return pkg;
+      const nl = xml.includes('\r\n') ? '\r\n' : '\n';
+      const ind = (/\n([ \t]*)<content>/.exec(pkg) || [, rel[1] + ' '])[1], i1 = ind + ' ', i2 = ind + '  ';
+      const ids = [...out.matchAll(/<content>\s*<id>(\d+)<\/id>/g)].map(m => +m[1]);
+      const id = Math.max(OWN_ID - 1, ...ids) + 1;
+      const version = (/<content>[\s\S]*?<version>([^<]*)<\/version>/.exec(pkg) ||
+                       /<release>[\s\S]*?<version>([^<]*)<\/version>/.exec(pkg))[1];
+      const files = missing.map(l => {
+        const w = written[l];
+        added.push(w.name);
+        return i1 + '<file>' + nl + i2 + '<url>' + w.name + '</url>' + nl +
+               i2 + '<md5>' + w.md5 + '</md5>' + nl + i2 + '<size>' + w.size + '</size>' + nl +
+               i2 + '<destination_path>%drive_0%/Bikenav/Map/Countries</destination_path>' + nl +
+               i2 + '<offset>0</offset>' + nl + i1 + '</file>' + nl;
+      }).join('');
+      const blk = nl + ind + '<content>' + nl + i1 + '<id>' + id + '</id>' + nl +
+                  i1 + '<description>' + prefix.replace(/_/g, ' ') + '</description>' + nl +
+                  i1 + '<version>' + version + '</version>' + nl +
+                  i1 + '<icon_url>content/icon/flag/' + prefix + '.png</icon_url>' + nl +
+                  files + ind + '</content>';
+      const at = rel.index + rel[0].length - rel[2].length;
+      return pkg.slice(0, at) + blk + pkg.slice(at);
+    });
   }
+  // a <content> of our own goes when its last file goes
+  out = out.replace(/[ \t]*<content>\s*<id>(\d+)<\/id>(?:(?!<file>)[\s\S])*?<\/content>[ \t]*\r?\n?/g,
+                    (blk, id) => +id >= OWN_ID ? '' : blk);
   return {xml: out, changed, removed, added};
 }
 
