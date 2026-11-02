@@ -236,43 +236,36 @@ async function oldFiles(dev, prefix) {
   const out = [];
   for await (const [name, h] of dev.countries.entries()) {
     const m = CHART.exec(name.replace(/\.crswap$/i, ''));
-    if (h.kind === 'file' && m && m[1].toLowerCase() === prefix.toLowerCase()) out.push(name);
+    if (h.kind === 'file' && m && same(m[1], prefix)) out.push(name);
   }
   return out;
 }
 
-// The device shows a map under the translation of "country_" + its
-// <description>, lower case, ' ' -> '_'; a description without one shows up
-// as "#country_czechrepublic".  Most names follow from the file prefix
-// ("CzechRepublic" -> "Czech Republic", "Alabama_UnitedStates" -> "Alabama
-// (United States)"); these do not.  Checked against the keys in gpstuner.dat.
-const NAMES = {
-  AmericanSamoa: 'American Samoa (United States)', AntiguaandBarbuda: 'Antigua and Barbuda',
-  BosniaandHerzegovina: 'Bosnia and Herzegovina', Cocos_KeelingIslands: 'Cocos (Keeling) Islands',
-  DemocraticRepublicofCongo: 'Democratic Republic of Congo', FYRofMacedonia: 'FYR of Macedonia',
-  GreatBritain: 'United Kingdom', Guam: 'Guam (United States)', GuineaBissau: 'Guinea-Bissau',
-  HeardIslandandMcDonaldIslands: 'Heard Island and McDonald Islands',
-  LaoPeoplesDemocraticRepublic: 'Lao People s Democratic Republic',
-  MarshallIslands: 'Marshall Islands (United States)', Marshallislands_UnitedStates: 'Marshall Islands (United States)',
-  MicronesiaFederatedStatesof: 'Micronesia', NorthernMarianaIslands: 'Northern Mariana Islands (United States)',
-  Palau: 'Palau (United States)', PuertoRico: 'Puerto Rico (United States)',
-  SaintHelenaAscensionandTristandaCunha: 'Saint Helena, Ascension and Tristan da Cunha',
-  SaintKittsandNevis: 'Saint Kitts and Nevis', SaintVincentandtheGrenadines: 'Saint Vincent and the Grenadines',
-  SaoTomeandPrincipe: 'Sao Tome and Principe',
-  SouthGeorgiaandtheSouthSandwichIslands: 'South Georgia and the South Sandwich Islands',
-  TrinidadandTobago: 'Trinidad and Tobago', TurksandCaicosIslands: 'Turks and Caicos Islands',
-  VirginIslandsUS: 'Virgin Islands (United States)', WallisandFutuna: 'Wallis and Futuna',
+// The map list on the device shows a map under the translation of "country" +
+// "_<part>" for every '_'-separated part of the file prefix, in lower case,
+// with usa and canada as "_(united_states)" and "_(canada)": Czech_Republic is
+// country_czech_republic.  Older zips were named CzechRepublic, which shows up
+// as "#country_czechrepublic"; same() still takes them for the same country,
+// so installing the map again replaces them.
+const countryName = prefix =>
+  prefix.replace(/_USA$/, ' (United States)').replace(/_Canada$/, ' (Canada)').replace(/_/g, ' ');
+// the old prefixes that differ by more than '_' and UnitedStates -> USA
+const OLD = {greatbritain: 'unitedkingdom', micronesiafederatedstatesof: 'micronesia',
+             virginislandsus: 'virginislandsusa', americansamoa: 'americansamoausa', guam: 'guamusa',
+             marshallislands: 'marshallislandsusa', northernmarianaislands: 'northernmarianaislandsusa',
+             palau: 'palauusa', puertorico: 'puertoricousa'};
+const country = p => {
+  const n = p.toLowerCase().replace(/[_\s(),.'-]/g, '').replace(/unitedstates/g, 'usa');
+  return OLD[n] ?? n;
 };
-const words = s => s.replace(/([a-z])([A-Z])/g, '$1 $2');
-const countryName = prefix => NAMES[prefix] ??
-  words(prefix).replace(/_(.*)$/, (_, c) => ' (' + words(c) + ')').replace(/_/g, ' ');
+const same = (a, b) => country(a) === country(b);
 
 const OWN_ID = 9000000;   // <content> ids from here on are ours, not GPS Tuner's
 // the device takes the file name from behind the url's last '/': without
 // one it opens the folder itself and calls the maps not installed correctly
 const DIR = 'content/';
 const FILE = /[ \t]*<file>\s*<url>([^<]*?)([^/<]+)<\/url>[\s\S]*?<\/file>[ \t]*\r?\n?/g;
-const mine = (base, prefix) => { const m = CHART.exec(base); return m && m[1].toLowerCase() === prefix.toLowerCase() && m; };
+const mine = (base, prefix) => { const m = CHART.exec(base); return m && same(m[1], prefix) && m; };
 
 // Point the entries of this map at the new files, drop the ones without a
 // new file.  Entries of other maps and of the software stay as they are.
@@ -480,4 +473,4 @@ async function finished(dev, charts, done) {
 if (typeof module !== 'undefined')
   module.exports = {md5, crc32, PackageSum, centralDirectory, bytes, openDevice, installedMaps,
                     oldFiles, patchPackages, install, finished, removeMap, unlisted, register,
-                    removeFiles, countryName, CHART};
+                    removeFiles, countryName, same, CHART};

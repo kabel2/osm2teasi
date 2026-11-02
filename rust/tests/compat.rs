@@ -1198,6 +1198,46 @@ fn regions_split_countries_the_firmware_knows_by_part() {
 }
 
 #[test]
+fn file_prefix_is_what_the_map_list_translates() {
+    // the device's map list (FUN_000c5bec): "country" + "_<part>" for every
+    // part of the prefix, usa and canada as the bracketed country
+    let shown = |p: &str| -> String {
+        let parts = p.to_lowercase();
+        let parts = parts.split('_').map(|s| match s {
+            "usa" => "_(united_states)".to_string(),
+            "canada" => "_(canada)".to_string(),
+            s => format!("_{}", s),
+        });
+        format!("country{}", parts.collect::<String>())
+    };
+    // where the firmware has its key under another name
+    let other = [
+        ("Québec (Canada)", "Quebec (Canada)"),
+        ("Micronesia, Federated States of", "Micronesia"),
+        ("Virgin Islands, U.S.", "Virgin Islands (United States)"),
+        ("American Samoa", "American Samoa (United States)"),
+        ("Guam", "Guam (United States)"),
+        ("Marshall Islands", "Marshall Islands (United States)"),
+        ("Northern Mariana Islands", "Northern Mariana Islands (United States)"),
+        ("Palau", "Palau (United States)"),
+        ("Puerto Rico", "Puerto Rico (United States)"),
+    ];
+    for &(name, _, _, prefix) in teasi::chart::COUNTRIES.iter() {
+        if name == "Canada" {
+            continue; // "canada" always becomes "(canada)"
+        }
+        let name = other.iter().find(|o| o.0 == name).map_or(name, |o| o.1);
+        let want = format!("country_{}", name.to_lowercase().replace(' ', "_"));
+        assert_eq!(shown(prefix), want, "{}", prefix);
+    }
+    let file = |s: &str| teasi::chart::country(s).unwrap().2.unwrap();
+    assert_eq!(file("Czech Republic"), "Czech_Republic");
+    assert_eq!(file("CzechRepublic"), "Czech_Republic");
+    assert_eq!(file("Quebec"), "Quebec_Canada");
+    assert_eq!(file("New South Wales"), "New_South_Wales_(Australia)");
+}
+
+#[test]
 fn grid_pairs_with_coincident_points() {
     // all ends of a street on one point (Ohio): the grid shrinks to 1e-9 and
     // pairs() must still stop at its edge

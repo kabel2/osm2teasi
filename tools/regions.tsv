@@ -16,26 +16,26 @@ africa	africa/algeria	174	Algeria	Algeria
 africa	africa/angola	181	Angola	Angola
 africa	africa/benin	190	Benin	Benin
 africa	africa/botswana	111	Botswana	Botswana
-africa	africa/burkina-faso	191	Burkina Faso	BurkinaFaso
+africa	africa/burkina-faso	191	Burkina Faso	Burkina_Faso
 africa	africa/burundi	189	Burundi	Burundi
 africa	africa/cameroon	204	Cameroon	Cameroon
 africa	africa/canary-islands	*15	Spain	Spain
-africa	africa/cape-verde	209	Cape Verde	CapeVerde
-africa	africa/central-african-republic	200	Central African Republic	CentralAfricanRepublic
+africa	africa/cape-verde	209	Cape Verde	Cape_Verde
+africa	africa/central-african-republic	200	Central African Republic	Central_African_Republic
 africa	africa/chad	300	Chad	Chad
 africa	africa/comores	208	Comoros	Comoros
 africa	africa/congo-brazzaville	206	Congo	Congo
-africa	africa/congo-democratic-republic	205	Democratic Republic of Congo	DemocraticRepublicofCongo
+africa	africa/congo-democratic-republic	205	Democratic Republic of Congo	Democratic_Republic_of_Congo
 africa	africa/djibouti	214	Djibouti	Djibouti
 africa	africa/egypt	175	Egypt	Egypt
-africa	africa/equatorial-guinea	229	Equatorial Guinea	EquatorialGuinea
+africa	africa/equatorial-guinea	229	Equatorial Guinea	Equatorial_Guinea
 africa	africa/eritrea	216	Eritrea	Eritrea
 africa	africa/ethiopia	218	Ethiopia	Ethiopia
 africa	africa/gabon	222	Gabon	Gabon
 africa	africa/ghana	224	Ghana	Ghana
 africa	africa/guinea	225	Guinea	Guinea
-africa	africa/guinea-bissau	228	Guinea-Bissau	GuineaBissau
-africa	africa/ivory-coast	203	Ivory Coast	IvoryCoast
+africa	africa/guinea-bissau	228	Guinea-Bissau	Guinea-Bissau
+africa	africa/ivory-coast	203	Ivory Coast	Ivory_Coast
 africa	africa/kenya	243	Kenya	Kenya
 africa	africa/lesotho	114	Lesotho	Lesotho
 africa	africa/liberia	250	Liberia	Liberia
@@ -51,14 +51,14 @@ africa	africa/namibia	113	Namibia	Namibia
 africa	africa/niger	268	Niger	Niger
 africa	africa/nigeria	270	Nigeria	Nigeria
 africa	africa/rwanda	284	Rwanda	Rwanda
-africa	africa/saint-helena-ascension-and-tristan-da-cunha	289	Saint Helena, Ascension and Tristan da Cunha	SaintHelenaAscensionandTristandaCunha
-africa	africa/sao-tome-and-principe	296	Sao Tome and Principe	SaoTomeandPrincipe
+africa	africa/saint-helena-ascension-and-tristan-da-cunha	289	Saint Helena, Ascension and Tristan da Cunha	Saint_Helena,_Ascension_and_Tristan_da_Cunha
+africa	africa/sao-tome-and-principe	296	Sao Tome and Principe	Sao_Tome_and_Principe
 africa	africa/senegal-and-gambia	287	Senegal	Senegal
 africa	africa/seychelles	297	Seychlles	Seychlles
-africa	africa/sierra-leone	292	Sierra Leone	SierraLeone
+africa	africa/sierra-leone	292	Sierra Leone	Sierra_Leone
 africa	africa/somalia	294	Somalia	Somalia
-africa	africa/south-africa	108	South Africa	SouthAfrica
-africa	africa/south-sudan	286	South Sudan	SouthSudan
+africa	africa/south-africa	108	South Africa	South_Africa
+africa	africa/south-sudan	286	South Sudan	South_Sudan
 africa	africa/sudan	285	Sudan	Sudan
 africa	africa/swaziland	112	Swaziland	Swaziland
 africa	africa/tanzania	309	Tanzania	Tanzania
@@ -74,8 +74,8 @@ asia	asia/bangladesh	192	Bangladesh	Bangladesh
 asia	asia/bhutan	198	Bhutan	Bhutan
 asia	asia/cambodia	245	Cambodia	Cambodia
 asia	asia/china	142	China	China
-asia	asia/east-timor	305	East Timor	EastTimor
-asia	asia/gcc-states	167	Saudi Arabia	SaudiArabia
+asia	asia/east-timor	305	East Timor	East_Timor
+asia	asia/gcc-states	167	Saudi Arabia	Saudi_Arabia
 asia	asia/india	123	India	India
 asia	asia/indonesia	160	Indonesia	Indonesia
 asia	asia/iran	165	Iran	Iran
@@ -85,18 +85,18 @@ asia	asia/japan	158	Japan	Japan
 asia	asia/jordan	242	Jordan	Jordan
 asia	asia/kazakhstan	172	Kazakhstan	Kazakhstan
 asia	asia/kyrgyzstan	244	Kyrgyzstan	Kyrgyzstan
-asia	asia/laos	249	Lao People s Democratic Republic	LaoPeoplesDemocraticRepublic
+asia	asia/laos	249	Lao People s Democratic Republic	Lao_People_s_Democratic_Republic
 asia	asia/lebanon	166	Lebanon	Lebanon
 asia	asia/malaysia-singapore-brunei	117	Malaysia	Malaysia
 asia	asia/maldives	255	Maldives	Maldives
 asia	asia/mongolia	259	Mongolia	Mongolia
 asia	asia/myanmar	258	Myanmar	Myanmar
 asia	asia/nepal	273	Nepal	Nepal
-asia	asia/north-korea	280	North Korea	NorthKorea
+asia	asia/north-korea	280	North Korea	North_Korea
 asia	asia/pakistan	275	Pakistan	Pakistan
 asia	asia/philippines	162	Philippines	Philippines
-asia	asia/south-korea	119	South Korea	SouthKorea
-asia	asia/sri-lanka	252	Sri Lanka	SriLanka
+asia	asia/south-korea	119	South Korea	South_Korea
+asia	asia/sri-lanka	252	Sri Lanka	Sri_Lanka
 asia	asia/syria	298	Syria	Syria
 asia	asia/taiwan	24	Taiwan	Taiwan
 asia	asia/tajikistan	302	Tajikistan	Tajikistan
@@ -106,31 +106,31 @@ asia	asia/uzbekistan	173	Uzbekistan	Uzbekistan
 asia	asia/vietnam	163	Vietnam	Vietnam
 asia	asia/yemen	318	Yemen	Yemen
 australia-oceania	australia-oceania/australia	45	Australia	Australia
-australia-oceania	australia-oceania/cook-islands	207	Cook Islands	CookIslands
+australia-oceania	australia-oceania/cook-islands	207	Cook Islands	Cook_Islands
 australia-oceania	australia-oceania/fiji	219	Fiji	Fiji
 australia-oceania	australia-oceania/kiribati	246	Kiribati	Kiribati
-australia-oceania	australia-oceania/marshall-islands	256	Marshall Islands	MarshallIslands
-australia-oceania	australia-oceania/micronesia	221	Micronesia, Federated States of	MicronesiaFederatedStatesof
+australia-oceania	australia-oceania/marshall-islands	256	Marshall Islands	Marshall_Islands_USA
+australia-oceania	australia-oceania/micronesia	221	Micronesia, Federated States of	Micronesia
 australia-oceania	australia-oceania/nauru	274	Nauru	Nauru
-australia-oceania	australia-oceania/new-caledonia	267	New Caledonia	NewCaledonia
-australia-oceania	australia-oceania/new-zealand	46	New Zealand	NewZealand
+australia-oceania	australia-oceania/new-caledonia	267	New Caledonia	New_Caledonia
+australia-oceania	australia-oceania/new-zealand	46	New Zealand	New_Zealand
 australia-oceania	australia-oceania/niue	272	Niue	Niue
-australia-oceania	australia-oceania/palau	277	Palau	Palau
-australia-oceania	australia-oceania/papua-new-guinea	278	Papua New Guinea	PapuaNewGuinea
+australia-oceania	australia-oceania/palau	277	Palau	Palau_USA
+australia-oceania	australia-oceania/papua-new-guinea	278	Papua New Guinea	Papua_New_Guinea
 australia-oceania	australia-oceania/pitcairn-islands	276	Pitcairn	Pitcairn
-australia-oceania	australia-oceania/polynesie-francaise	282	French Polynesia	FrenchPolynesia
+australia-oceania	australia-oceania/polynesie-francaise	282	French Polynesia	French_Polynesia
 australia-oceania	australia-oceania/samoa	317	Samoa	Samoa
-australia-oceania	australia-oceania/solomon-islands	291	Solomon Islands	SolomonIslands
+australia-oceania	australia-oceania/solomon-islands	291	Solomon Islands	Solomon_Islands
 australia-oceania	australia-oceania/tokelau	303	Tokelau	Tokelau
 australia-oceania	australia-oceania/tonga	306	Tonga	Tonga
 australia-oceania	australia-oceania/tuvalu	308	Tuvalu	Tuvalu
 australia-oceania	australia-oceania/vanuatu	315	Vanuatu	Vanuatu
-australia-oceania	australia-oceania/wallis-et-futuna	316	Wallis and Futuna	WallisandFutuna
+australia-oceania	australia-oceania/wallis-et-futuna	316	Wallis and Futuna	Wallis_and_Futuna
 central-america	central-america/bahamas	146	Bahamas	Bahamas
 central-america	central-america/belize	194	Belize	Belize
-central-america	central-america/costa-rica	210	Costa Rica	CostaRica
+central-america	central-america/costa-rica	210	Costa Rica	Costa_Rica
 central-america	central-america/cuba	211	Cuba	Cuba
-central-america	central-america/el-salvador	293	El Salvador	ElSalvador
+central-america	central-america/el-salvador	293	El Salvador	El_Salvador
 central-america	central-america/guatemala	232	Guatemala	Guatemala
 central-america	central-america/haiti-and-domrep	236	Haiti	Haiti
 central-america	central-america/honduras	235	Honduras	Honduras
@@ -143,31 +143,31 @@ europe	europe/austria	2	Austria	Austria
 europe	europe/azores	*13	Portugal	Portugal
 europe	europe/belarus	26	Belarus	Belarus
 europe	europe/belgium	3	Belgium	Belgium
-europe	europe/bosnia-herzegovina	27	Bosnia and Herzegovina	BosniaandHerzegovina
+europe	europe/bosnia-herzegovina	27	Bosnia and Herzegovina	Bosnia_and_Herzegovina
 europe	europe/bulgaria	28	Bulgaria	Bulgaria
 europe	europe/croatia	29	Croatia	Croatia
 europe	europe/cyprus	143	Cyprus	Cyprus
-europe	europe/czech-republic	30	Czech Republic	CzechRepublic
+europe	europe/czech-republic	30	Czech Republic	Czech_Republic
 europe	europe/denmark	4	Denmark	Denmark
 europe	europe/estonia	31	Estonia	Estonia
-europe	europe/faroe-islands	220	Faroe Islands	FaroeIslands
+europe	europe/faroe-islands	220	Faroe Islands	Faroe_Islands
 europe	europe/finland	5	Finland	Finland
 europe	europe/france	6	France	France
 europe	europe/georgia	171	Georgia	Georgia
 europe	europe/germany	7	Germany	Germany
 europe	europe/greece	33	Greece	Greece
-europe	europe/guernsey-jersey	326	Channel Islands	ChannelIslands
+europe	europe/guernsey-jersey	326	Channel Islands	Channel_Islands
 europe	europe/hungary	18	Hungary	Hungary
 europe	europe/iceland	110	Iceland	Iceland
 europe	europe/ireland-and-northern-ireland	8	Ireland	Ireland
-europe	europe/isle-of-man	237	Isle Of Man	IsleOfMan
+europe	europe/isle-of-man	237	Isle Of Man	Isle_Of_Man
 europe	europe/italy	9	Italy	Italy
 europe	europe/kosovo	141	Kosovo	Kosovo
 europe	europe/latvia	34	Latvia	Latvia
 europe	europe/liechtenstein	21	Liechtenstein	Liechtenstein
 europe	europe/lithuania	35	Lithuania	Lithuania
 europe	europe/luxembourg	10	Luxembourg	Luxembourg
-europe	europe/macedonia	32	FYR of Macedonia	FYRofMacedonia
+europe	europe/macedonia	32	FYR of Macedonia	FYR_of_Macedonia
 europe	europe/malta	109	Malta	Malta
 europe	europe/moldova	36	Moldova	Moldova
 europe	europe/monaco	20	Monaco	Monaco
@@ -185,75 +185,75 @@ europe	europe/sweden	16	Sweden	Sweden
 europe	europe/switzerland	19	Switzerland	Switzerland
 europe	europe/turkey	43	Turkey	Turkey
 europe	europe/ukraine	44	Ukraine	Ukraine
-europe	europe/united-kingdom	17	United Kingdom	GreatBritain
+europe	europe/united-kingdom	17	United Kingdom	United_Kingdom
 north-america	north-america/canada/alberta	125	Alberta (Canada)	Alberta_Canada
-north-america	north-america/canada/british-columbia	126	British Columbia (Canada)	BritishColumbia_Canada
+north-america	north-america/canada/british-columbia	126	British Columbia (Canada)	British_Columbia_Canada
 north-america	north-america/canada/manitoba	127	Manitoba (Canada)	Manitoba_Canada
-north-america	north-america/canada/new-brunswick	128	New Brunswick (Canada)	NewBrunswick_Canada
-north-america	north-america/canada/newfoundland-and-labrador	129	Newfoundland And Labrador (Canada)	NewfoundlandAndLabrador_Canada
-north-america	north-america/canada/northwest-territories	130	Northwest Territories (Canada)	NorthwestTerritories_Canada
-north-america	north-america/canada/nova-scotia	131	Nova Scotia (Canada)	NovaScotia_Canada
+north-america	north-america/canada/new-brunswick	128	New Brunswick (Canada)	New_Brunswick_Canada
+north-america	north-america/canada/newfoundland-and-labrador	129	Newfoundland And Labrador (Canada)	Newfoundland_And_Labrador_Canada
+north-america	north-america/canada/northwest-territories	130	Northwest Territories (Canada)	Northwest_Territories_Canada
+north-america	north-america/canada/nova-scotia	131	Nova Scotia (Canada)	Nova_Scotia_Canada
 north-america	north-america/canada/nunavut	132	Nunavut (Canada)	Nunavut_Canada
 north-america	north-america/canada/ontario	133	Ontario (Canada)	Ontario_Canada
-north-america	north-america/canada/prince-edward-island	134	Prince Edward Island (Canada)	PrinceEdwardIsland_Canada
+north-america	north-america/canada/prince-edward-island	134	Prince Edward Island (Canada)	Prince_Edward_Island_Canada
 north-america	north-america/canada/quebec	135	Québec (Canada)	Quebec_Canada
 north-america	north-america/canada/saskatchewan	136	Saskatchewan (Canada)	Saskatchewan_Canada
-north-america	north-america/canada/yukon	137	Yukon Territory (Canada)	YukonTerritory_Canada
+north-america	north-america/canada/yukon	137	Yukon Territory (Canada)	Yukon_Territory_Canada
 north-america	north-america/greenland	231	Greenland	Greenland
 north-america	north-america/mexico	121	Mexico	Mexico
-north-america	north-america/us/alabama	49	Alabama (United States)	Alabama_UnitedStates
-north-america	north-america/us/alaska	50	Alaska (United States)	Alaska_UnitedStates
-north-america	north-america/us/arizona	52	Arizona (United States)	Arizona_UnitedStates
-north-america	north-america/us/arkansas	53	Arkansas (United States)	Arkansas_UnitedStates
-north-america	north-america/us/california	54	California (United States)	California_UnitedStates
-north-america	north-america/us/colorado	55	Colorado (United States)	Colorado_UnitedStates
-north-america	north-america/us/connecticut	56	Connecticut (United States)	Connecticut_UnitedStates
-north-america	north-america/us/delaware	57	Delaware (United States)	Delaware_UnitedStates
-north-america	north-america/us/district-of-columbia	58	District Of Columbia (United States)	DistrictOfColumbia_UnitedStates
-north-america	north-america/us/florida	60	Florida (United States)	Florida_UnitedStates
-north-america	north-america/us/georgia	61	Georgia (United States)	Georgia_UnitedStates
-north-america	north-america/us/hawaii	63	Hawaii (United States)	Hawaii_UnitedStates
-north-america	north-america/us/idaho	64	Idaho (United States)	Idaho_UnitedStates
-north-america	north-america/us/illinois	65	Illinois (United States)	Illinois_UnitedStates
-north-america	north-america/us/indiana	66	Indiana (United States)	Indiana_UnitedStates
-north-america	north-america/us/iowa	67	Iowa (United States)	Iowa_UnitedStates
-north-america	north-america/us/kansas	68	Kansas (United States)	Kansas_UnitedStates
-north-america	north-america/us/kentucky	69	Kentucky (United States)	Kentucky_UnitedStates
-north-america	north-america/us/louisiana	70	Louisiana (United States)	Louisiana_UnitedStates
-north-america	north-america/us/maine	71	Maine (United States)	Maine_UnitedStates
-north-america	north-america/us/maryland	72	Maryland (United States)	Maryland_UnitedStates
-north-america	north-america/us/massachusetts	74	Massachusetts (United States)	Massachusetts_UnitedStates
-north-america	north-america/us/michigan	75	Michigan (United States)	Michigan_UnitedStates
-north-america	north-america/us/minnesota	76	Minnesota (United States)	Minnesota_UnitedStates
-north-america	north-america/us/mississippi	77	Mississippi (United States)	Mississippi_UnitedStates
-north-america	north-america/us/missouri	78	Missouri (United States)	Missouri_UnitedStates
-north-america	north-america/us/montana	79	Montana (United States)	Montana_UnitedStates
-north-america	north-america/us/nebraska	80	Nebraska (United States)	Nebraska_UnitedStates
-north-america	north-america/us/nevada	81	Nevada (United States)	Nevada_UnitedStates
-north-america	north-america/us/new-hampshire	82	New Hampshire (United States)	NewHampshire_UnitedStates
-north-america	north-america/us/new-jersey	83	New Jersey (United States)	NewJersey_UnitedStates
-north-america	north-america/us/new-mexico	84	New Mexico (United States)	NewMexico_UnitedStates
-north-america	north-america/us/new-york	85	New York (United States)	NewYork_UnitedStates
-north-america	north-america/us/north-carolina	86	North Carolina (United States)	NorthCarolina_UnitedStates
-north-america	north-america/us/north-dakota	87	North Dakota (United States)	NorthDakota_UnitedStates
-north-america	north-america/us/ohio	89	Ohio (United States)	Ohio_UnitedStates
-north-america	north-america/us/oklahoma	90	Oklahoma (United States)	Oklahoma_UnitedStates
-north-america	north-america/us/oregon	91	Oregon (United States)	Oregon_UnitedStates
-north-america	north-america/us/pennsylvania	93	Pennsylvania (United States)	Pennsylvania_UnitedStates
-north-america	north-america/us/puerto-rico	94	Puerto Rico (United States)	PuertoRico_UnitedStates
-north-america	north-america/us/rhode-island	95	Rhode Island (United States)	RhodeIsland_UnitedStates
-north-america	north-america/us/south-carolina	96	South Carolina (United States)	SouthCarolina_UnitedStates
-north-america	north-america/us/south-dakota	97	South Dakota (United States)	SouthDakota_UnitedStates
-north-america	north-america/us/tennessee	98	Tennessee (United States)	Tennessee_UnitedStates
-north-america	north-america/us/texas	99	Texas (United States)	Texas_UnitedStates
-north-america	north-america/us/us-virgin-islands	314	Virgin Islands, U.S.	VirginIslandsUS
-north-america	north-america/us/utah	100	Utah (United States)	Utah_UnitedStates
-north-america	north-america/us/vermont	101	Vermont (United States)	Vermont_UnitedStates
-north-america	north-america/us/virginia	103	Virginia (United States)	Virginia_UnitedStates
-north-america	north-america/us/washington	104	Washington (United States)	Washington_UnitedStates
-north-america	north-america/us/west-virginia	105	West Virginia (United States)	WestVirginia_UnitedStates
-north-america	north-america/us/wisconsin	106	Wisconsin (United States)	Wisconsin_UnitedStates
-north-america	north-america/us/wyoming	107	Wyoming (United States)	Wyoming_UnitedStates
+north-america	north-america/us/alabama	49	Alabama (United States)	Alabama_USA
+north-america	north-america/us/alaska	50	Alaska (United States)	Alaska_USA
+north-america	north-america/us/arizona	52	Arizona (United States)	Arizona_USA
+north-america	north-america/us/arkansas	53	Arkansas (United States)	Arkansas_USA
+north-america	north-america/us/california	54	California (United States)	California_USA
+north-america	north-america/us/colorado	55	Colorado (United States)	Colorado_USA
+north-america	north-america/us/connecticut	56	Connecticut (United States)	Connecticut_USA
+north-america	north-america/us/delaware	57	Delaware (United States)	Delaware_USA
+north-america	north-america/us/district-of-columbia	58	District Of Columbia (United States)	District_Of_Columbia_USA
+north-america	north-america/us/florida	60	Florida (United States)	Florida_USA
+north-america	north-america/us/georgia	61	Georgia (United States)	Georgia_USA
+north-america	north-america/us/hawaii	63	Hawaii (United States)	Hawaii_USA
+north-america	north-america/us/idaho	64	Idaho (United States)	Idaho_USA
+north-america	north-america/us/illinois	65	Illinois (United States)	Illinois_USA
+north-america	north-america/us/indiana	66	Indiana (United States)	Indiana_USA
+north-america	north-america/us/iowa	67	Iowa (United States)	Iowa_USA
+north-america	north-america/us/kansas	68	Kansas (United States)	Kansas_USA
+north-america	north-america/us/kentucky	69	Kentucky (United States)	Kentucky_USA
+north-america	north-america/us/louisiana	70	Louisiana (United States)	Louisiana_USA
+north-america	north-america/us/maine	71	Maine (United States)	Maine_USA
+north-america	north-america/us/maryland	72	Maryland (United States)	Maryland_USA
+north-america	north-america/us/massachusetts	74	Massachusetts (United States)	Massachusetts_USA
+north-america	north-america/us/michigan	75	Michigan (United States)	Michigan_USA
+north-america	north-america/us/minnesota	76	Minnesota (United States)	Minnesota_USA
+north-america	north-america/us/mississippi	77	Mississippi (United States)	Mississippi_USA
+north-america	north-america/us/missouri	78	Missouri (United States)	Missouri_USA
+north-america	north-america/us/montana	79	Montana (United States)	Montana_USA
+north-america	north-america/us/nebraska	80	Nebraska (United States)	Nebraska_USA
+north-america	north-america/us/nevada	81	Nevada (United States)	Nevada_USA
+north-america	north-america/us/new-hampshire	82	New Hampshire (United States)	New_Hampshire_USA
+north-america	north-america/us/new-jersey	83	New Jersey (United States)	New_Jersey_USA
+north-america	north-america/us/new-mexico	84	New Mexico (United States)	New_Mexico_USA
+north-america	north-america/us/new-york	85	New York (United States)	New_York_USA
+north-america	north-america/us/north-carolina	86	North Carolina (United States)	North_Carolina_USA
+north-america	north-america/us/north-dakota	87	North Dakota (United States)	North_Dakota_USA
+north-america	north-america/us/ohio	89	Ohio (United States)	Ohio_USA
+north-america	north-america/us/oklahoma	90	Oklahoma (United States)	Oklahoma_USA
+north-america	north-america/us/oregon	91	Oregon (United States)	Oregon_USA
+north-america	north-america/us/pennsylvania	93	Pennsylvania (United States)	Pennsylvania_USA
+north-america	north-america/us/puerto-rico	94	Puerto Rico (United States)	Puerto_Rico_USA
+north-america	north-america/us/rhode-island	95	Rhode Island (United States)	Rhode_Island_USA
+north-america	north-america/us/south-carolina	96	South Carolina (United States)	South_Carolina_USA
+north-america	north-america/us/south-dakota	97	South Dakota (United States)	South_Dakota_USA
+north-america	north-america/us/tennessee	98	Tennessee (United States)	Tennessee_USA
+north-america	north-america/us/texas	99	Texas (United States)	Texas_USA
+north-america	north-america/us/us-virgin-islands	314	Virgin Islands, U.S.	Virgin_Islands_USA
+north-america	north-america/us/utah	100	Utah (United States)	Utah_USA
+north-america	north-america/us/vermont	101	Vermont (United States)	Vermont_USA
+north-america	north-america/us/virginia	103	Virginia (United States)	Virginia_USA
+north-america	north-america/us/washington	104	Washington (United States)	Washington_USA
+north-america	north-america/us/west-virginia	105	West Virginia (United States)	West_Virginia_USA
+north-america	north-america/us/wisconsin	106	Wisconsin (United States)	Wisconsin_USA
+north-america	north-america/us/wyoming	107	Wyoming (United States)	Wyoming_USA
 russia	russia/central-fed-district	*47	Russia	Russia
 russia	russia/crimean-fed-district	*47	Russia	Russia
 russia	russia/far-eastern-fed-district	*47	Russia	Russia

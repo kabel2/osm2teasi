@@ -501,6 +501,15 @@ terrain 18), and it prints every file's `packages.xml` size and MD5 at the end. 
 takes a name from `COUNTRIES` (section 1) or a bare code, and the country decides both the
 header's code and the file names. `--original=<chart>` is passed on to osm and osmarea.
 
+**File names.** The map list on the device (`FUN_000c5bec`) shows a map by its file name: it
+lower-cases it, splits it at `_` and looks up `country` + `_<part>` for every part but the
+layer, with `usa` becoming `_(united_states)` and `canada` `_(canada)`. `Czech_Republic_osm.v…`
+is shown as the translation of `country_czech_republic` ("Tschechien"), `CzechRepublic_osm.v…`
+as `#country_czechrepublic` (checked on the device 2026-11-02). `<description>` in
+`packages.xml` plays no part in it. The prefixes in `COUNTRIES` follow that rule; before
+2026-11-02 they were the names without spaces (`CzechRepublic`, `Alabama_UnitedStates`,
+`GreatBritain`), the name used for the United Kingdom experiments below.
+
 A layer with nothing in the area is **left out**: a file without a single record is a bare
 120-byte header, and both the MAC and the firmware's check read 1 KB from 0x44 plus the last
 KB, so there is nothing there to sign. Andorra, landlocked, has no `osmpoint` file for that
