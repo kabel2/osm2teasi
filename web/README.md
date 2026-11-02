@@ -22,7 +22,9 @@ the device and checked against its CRC. It deletes the older files of the same c
 puts the new files into `BikeNav/packages.xml` where an original map was listed, also when
 Remove had taken its entries out before: the country's `<content>` stays, and the entries go
 back into it. A country the device never had gets a `<content>` of its own (id from 9000000)
-in the first Map package, which Remove takes out again: the TAHUNA Tool calls every file in
+in the first Map package, which Remove takes out again; its `<description>` is the name the
+firmware translates (`Czech Republic`, not `CzechRepublic`, which the device would show as
+`#country_czechrepublic`). The TAHUNA Tool calls every file in
 `Map/Countries` that `packages.xml` does not list unknown and wants to delete all maps.
 Remove takes out only the entries of an original country; the first change, by either, keeps
 the old file as `packages.orig.xml`. Files in `Map/Countries` that `packages.xml` does not

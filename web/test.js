@@ -202,6 +202,21 @@ function check(c, label) {
   if (Object.keys(await F.unlisted(t.dev)).length) throw new Error('still unlisted: ' + JSON.stringify(await F.unlisted(t.dev)));
   console.log('ok unlisted files: Third added, the unfinished ' + prefix + ' and notes.txt removed');
 
+  // the name the device translates: from the prefix, or from the table; a
+  // <content> an older installer named after the prefix gets the name
+  const names = {CzechRepublic: 'Czech Republic', Alabama_UnitedStates: 'Alabama (United States)',
+                 NewYork_UnitedStates: 'New York (United States)', GreatBritain: 'United Kingdom',
+                 BosniaandHerzegovina: 'Bosnia and Herzegovina', Denmark: 'Denmark'};
+  for (const [p, n] of Object.entries(names))
+    if (F.countryName(p) !== n) throw new Error(p + ' -> ' + F.countryName(p));
+  const cz = block(9000001, 'CzechRepublic', entry('content/', 'CzechRepublic_osm.v20261008'));
+  const czXml = original.replace('  </release>', cz + '  </release>');
+  const p2 = F.patchPackages(czXml, 'CzechRepublic', {osm: {name: 'CzechRepublic_osm.v20261101', md5: 'ab', size: 9}});
+  if (p2.xml !== czXml.replace('>CzechRepublic<', '>Czech Republic<').replace('v20261008</url>\n     <md5>0</md5>\n     <size>1',
+                                                                                 'v20261101</url>\n     <md5>ab</md5>\n     <size>9'))
+    throw new Error('name not fixed: ' + p2.xml);
+  console.log('ok country names');
+
   // the zip changed on the server: stop, do not retry
   t = await device();
   const stale = async () => { throw Object.assign(new Error('changed'), {stale: true}); };

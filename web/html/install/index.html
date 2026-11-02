@@ -119,7 +119,7 @@ async function showDevice() {
 // Unlisted files: put a complete map into packages.xml, or remove what an
 // unfinished install left (the whole map) or what is no map at all.
 async function fix(prefix, add, odd) {
-  const what = prefix ? prefix.replace(/_/g, ' ') : odd[''].files.join(', ');
+  const what = prefix ? countryName(prefix) : odd[''].files.join(', ');
   if (busy || !confirm(add ? 'Add ' + what + ' to BikeNav/packages.xml?'
                            : 'Remove ' + what + ' from the Teasi?')) return;
   busy = true;
@@ -145,7 +145,7 @@ $('pick').onclick = async () => {
 };
 
 async function remove(prefix) {
-  if (busy || !confirm('Remove the map ' + prefix.replace(/_/g, ' ') + ' from the Teasi?')) return;
+  if (busy || !confirm('Remove the map ' + countryName(prefix) + ' from the Teasi?')) return;
   busy = true;
   const out = [];
   try { await removeMap(dev, prefix, s => out.push(s)); }
@@ -251,16 +251,16 @@ async function run(files, label, id, open) {
   const need = charts.reduce((n, f) => n + f.size, 0);
   const have = charts.reduce((n, f) => n + (keep[f.name] ? f.size : 0), 0);
   const kept = Object.keys(keep).length;
-  if (!confirm((kept ? 'Continue installing ' + prefix.replace(/_/g, ' ') + ': ' + kept + ' of ' + charts.length +
+  if (!confirm((kept ? 'Continue installing ' + countryName(prefix) + ': ' + kept + ' of ' + charts.length +
                        ' files are on the Teasi already, ' + mb(need - have) + ' to go.'
-                     : 'Install ' + prefix.replace(/_/g, ' ') + ' (' + mb(need) + ') on the Teasi?') +
+                     : 'Install ' + countryName(prefix) + ' (' + mb(need) + ') on the Teasi?') +
                (old.length ? '\n\nThis deletes the map that is there now:\n' + old.join('\n') : '') +
                '\n\nThe entries in packages.xml are updated; the first time, the original is kept as ' +
                'BikeNav/packages.orig.xml.')) return;
   busy = true;
   const lines = [], t0 = Date.now(), recent = [];
   let got = 0, last = 0, lock = null;
-  job('<p>Installing <b>' + esc(prefix.replace(/_/g, ' ')) + '</b>…</p><progress id="bar" max="' + need +
+  job('<p>Installing <b>' + esc(countryName(prefix)) + '</b>…</p><progress id="bar" max="' + need +
       '" value="0"></progress><div id="stat" class="mute"></div><div id="wait" class="bad"></div>' +
       '<div id="wake" class="mute"></div><div id="log"></div>');
   const log = s => { lines.push(s); $('log').textContent = lines.join('\n'); $('log').scrollTop = 1e9; };

@@ -241,6 +241,32 @@ async function oldFiles(dev, prefix) {
   return out;
 }
 
+// The device shows a map under the translation of "country_" + its
+// <description>, lower case, ' ' -> '_'; a description without one shows up
+// as "#country_czechrepublic".  Most names follow from the file prefix
+// ("CzechRepublic" -> "Czech Republic", "Alabama_UnitedStates" -> "Alabama
+// (United States)"); these do not.  Checked against the keys in gpstuner.dat.
+const NAMES = {
+  AmericanSamoa: 'American Samoa (United States)', AntiguaandBarbuda: 'Antigua and Barbuda',
+  BosniaandHerzegovina: 'Bosnia and Herzegovina', Cocos_KeelingIslands: 'Cocos (Keeling) Islands',
+  DemocraticRepublicofCongo: 'Democratic Republic of Congo', FYRofMacedonia: 'FYR of Macedonia',
+  GreatBritain: 'United Kingdom', Guam: 'Guam (United States)', GuineaBissau: 'Guinea-Bissau',
+  HeardIslandandMcDonaldIslands: 'Heard Island and McDonald Islands',
+  LaoPeoplesDemocraticRepublic: 'Lao People s Democratic Republic',
+  MarshallIslands: 'Marshall Islands (United States)', Marshallislands_UnitedStates: 'Marshall Islands (United States)',
+  MicronesiaFederatedStatesof: 'Micronesia', NorthernMarianaIslands: 'Northern Mariana Islands (United States)',
+  Palau: 'Palau (United States)', PuertoRico: 'Puerto Rico (United States)',
+  SaintHelenaAscensionandTristandaCunha: 'Saint Helena, Ascension and Tristan da Cunha',
+  SaintKittsandNevis: 'Saint Kitts and Nevis', SaintVincentandtheGrenadines: 'Saint Vincent and the Grenadines',
+  SaoTomeandPrincipe: 'Sao Tome and Principe',
+  SouthGeorgiaandtheSouthSandwichIslands: 'South Georgia and the South Sandwich Islands',
+  TrinidadandTobago: 'Trinidad and Tobago', TurksandCaicosIslands: 'Turks and Caicos Islands',
+  VirginIslandsUS: 'Virgin Islands (United States)', WallisandFutuna: 'Wallis and Futuna',
+};
+const words = s => s.replace(/([a-z])([A-Z])/g, '$1 $2');
+const countryName = prefix => NAMES[prefix] ??
+  words(prefix).replace(/_(.*)$/, (_, c) => ' (' + words(c) + ')').replace(/_/g, ' ');
+
 const OWN_ID = 9000000;   // <content> ids from here on are ours, not GPS Tuner's
 // the device takes the file name from behind the url's last '/': without
 // one it opens the folder itself and calls the maps not installed correctly
@@ -272,11 +298,11 @@ function patchPackages(xml, prefix, written, orig = '') {
       const m = mine(base, prefix);
       if (m) dirs[m[2].toLowerCase()] ??= dir;
     }
-    const name = prefix.replace(/_/g, ' ').toLowerCase();
+    const names = [prefix.replace(/_/g, ' '), countryName(prefix)].map(n => n.toLowerCase());
     out = out.replace(/([ \t]*)<content>[\s\S]*?<\/content>/g, (blk, ind) => {
       if (added.length) return blk;
       const d = /<description>([^<]*)<\/description>/.exec(blk);
-      const ours = (d && d[1].trim().toLowerCase() === name) ||
+      const ours = (d && names.includes(d[1].trim().toLowerCase())) ||
                    [...blk.matchAll(FILE)].some(([, , base]) => mine(base, prefix));
       if (!ours) return blk;
       const nl = xml.includes('\r\n') ? '\r\n' : '\n', i1 = ind + ' ', i2 = ind + '  ';
@@ -314,7 +340,7 @@ function patchPackages(xml, prefix, written, orig = '') {
                i2 + '<offset>0</offset>' + nl + i1 + '</file>' + nl;
       }).join('');
       const blk = nl + ind + '<content>' + nl + i1 + '<id>' + id + '</id>' + nl +
-                  i1 + '<description>' + prefix.replace(/_/g, ' ') + '</description>' + nl +
+                  i1 + '<description>' + countryName(prefix) + '</description>' + nl +
                   i1 + '<version>' + version + '</version>' + nl +
                   i1 + '<icon_url>content/icon/flag/' + prefix + '.png</icon_url>' + nl +
                   files + ind + '</content>';
@@ -322,6 +348,10 @@ function patchPackages(xml, prefix, written, orig = '') {
       return pkg.slice(0, at) + blk + pkg.slice(at);
     });
   }
+  // a <content> of our own that an older installer named after the prefix
+  out = out.replace(/(<content>\s*<id>(\d+)<\/id>\s*<description>)[^<]*(<\/description>[\s\S]*?<\/content>)/g,
+                    (blk, a, id, b) => +id >= OWN_ID && [...blk.matchAll(FILE)].some(([, , base]) => mine(base, prefix))
+                                       ? a + countryName(prefix) + b : blk);
   // a <content> of our own goes when its last file goes
   out = out.replace(/[ \t]*<content>\s*<id>(\d+)<\/id>(?:(?!<file>)[\s\S])*?<\/content>[ \t]*\r?\n?/g,
                     (blk, id) => +id >= OWN_ID ? '' : blk);
@@ -450,4 +480,4 @@ async function finished(dev, charts, done) {
 if (typeof module !== 'undefined')
   module.exports = {md5, crc32, PackageSum, centralDirectory, bytes, openDevice, installedMaps,
                     oldFiles, patchPackages, install, finished, removeMap, unlisted, register,
-                    removeFiles, CHART};
+                    removeFiles, countryName, CHART};
